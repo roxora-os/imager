@@ -1,0 +1,11 @@
+dev/
+cache/
+output/
+node_modules/
+build/
+dist/
+vendor/
+*.log
+*.img
+*.img.xz
+.DS_Store

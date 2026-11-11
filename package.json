@@ -1,0 +1,41 @@
+{
+  "name": "roxora-imager",
+  "productName": "Roxora Imager",
+  "version": "0.1.0",
+  "description": "Write Roxora images to SD cards and USB drives, and flash SPI NOR or eMMC over Maskrom.",
+  "homepage": "https://github.com/roxora-os/imager",
+  "license": "GPL-2.0-only",
+  "author": "Ga Hing Woo <gahing@gahingwoo.com>",
+  "private": true,
+  "main": "build/main/main.js",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "start": "npm run build && electron .",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run",
+    "rebuild-native": "electron-rebuild -f -o drivelist,lzma-native,xxhash-addon,mountutils,@ronomon/direct-io"
+  },
+  "dependencies": {
+    "@balena/sudo-prompt": "9.2.1-workaround-windows-amperstand-in-username-0849e215b947987a643fe5763902aea201255534",
+    "etcher-sdk": "10.2.20"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "4.0.1",
+    "@noble/hashes": "2.4.0",
+    "@patternfly/patternfly": "6.7.0",
+    "@patternfly/react-core": "6.7.0",
+    "@patternfly/react-icons": "6.7.0",
+    "@types/node": "22.19.1",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "@vitejs/plugin-react": "5.1.0",
+    "electron": "45.2.3",
+    "electron-builder": "26.0.12",
+    "esbuild": "0.25.12",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
+    "typescript": "5.9.3",
+    "vite": "7.2.2",
+    "vitest": "4.0.8"
+  }
+}
