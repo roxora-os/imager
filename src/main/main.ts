@@ -56,6 +56,9 @@ function createWindow() {
     width: 1100, height: 760, minWidth: 720, minHeight: 560,
     show: false,
     title: 'Roxora Imager',
+    // The design icon (resources/icons/, from roxora-os/design) for the title
+    // bar and task switcher on Linux and Windows; macOS uses the bundle's .icns.
+    icon: join(resourcesDir, 'icons', 'png', 'roxora-imager-256.png'),
     backgroundColor: nativeTheme.shouldUseDarkColors ? '#1b1d21' : '#f0f0f0',
     autoHideMenuBar: true,
     webPreferences: {

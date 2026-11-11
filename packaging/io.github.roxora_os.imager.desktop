@@ -3,8 +3,10 @@ Type=Application
 Name=Roxora Imager
 Comment=Write Roxora images to SD cards, USB drives and board storage
 Exec=roxora-imager %U
-Icon=roxora-imager
+Icon=io.github.roxora_os.imager
 Categories=Utility;
 Keywords=SD card;image;flash;maskrom;eMMC;
 Terminal=false
-StartupWMClass=Roxora Imager
+# What Electron sets from package.json desktopName: the Wayland app_id and
+# the X11 WM_CLASS are both io.github.roxora_os.imager.
+StartupWMClass=io.github.roxora_os.imager

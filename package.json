@@ -8,6 +8,7 @@
   "author": "Ga Hing Woo <gahing@gahingwoo.com>",
   "private": true,
   "main": "build/main/main.js",
+  "desktopName": "io.github.roxora_os.imager.desktop",
   "scripts": {
     "build": "node scripts/build.mjs",
     "start": "npm run build && electron .",
@@ -57,6 +58,8 @@
       "build/**/*",
       "!build/**/*.map",
       "resources/**/*",
+      "!resources/icons/*.ico",
+      "!resources/icons/*.icns",
       "package.json"
     ],
     "asar": true,
@@ -64,14 +67,14 @@
       "**/*.node"
     ],
     "npmRebuild": false,
-    "icon": "build-res/icon.png",
     "artifactName": "roxora-imager-${version}-${os}-${arch}.${ext}",
     "linux": {
       "target": [
         "dir",
         "AppImage"
       ],
-      "category": "System"
+      "category": "System",
+      "icon": "build-res/linux-icons"
     },
     "mac": {
       "target": [
@@ -79,13 +82,15 @@
       ],
       "category": "public.app-category.utilities",
       "identity": null,
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "icon": "build-res/icon.icns"
     },
     "win": {
       "target": [
         "nsis",
         "zip"
-      ]
+      ],
+      "icon": "build-res/icon.ico"
     },
     "nsis": {
       "oneClick": false,

@@ -1,5 +1,7 @@
 # Roxora Imager
 
+<img src="resources/icons/roxora-imager.svg" alt="Roxora Imager icon: an SD card in the three Roxora bands in front of an eMMC chip" width="96" height="96">
+
 A desktop app that installs [Roxora](https://github.com/roxora-os/build)
 images in two ways:
 
@@ -60,6 +62,7 @@ What each system asks on first start, and the drivers for Maskrom writing:
 | Maskrom writing | rkdeveloptool compiled to WebAssembly with libusb's WebUSB backend, as in [edk2-webflash](https://github.com/gahingwoo/edk2-webflash), running in a worker inside the app. |
 | Maskrom loader | Not shipped. The first Maskrom write downloads the pieces from Rockchip's [rkbin](https://github.com/rockchip-linux/rkbin) at a pinned commit (raw.githubusercontent.com), checks each against a pinned SHA-256, and builds the loader the way rkbin's boot_merger does (`src/maskrom/loader-merge.ts`, ported from RKDevelopTool-GUI). The result must match the SHA-256 of Rockchip's own build of that loader (`src/maskrom/loaders.ts`). The desktop app keeps it in its user data folder (`loaders/`), the web version in the browser's cache storage. Without a connection the write stops before anything is written and says so. |
 | Interface | Electron, React and [PatternFly](https://www.patternfly.org/). |
+| Icon | [roxora-os/design](https://github.com/roxora-os/design/tree/main/icons/imager) `icons/imager/`, copied unchanged into `resources/icons/` from design commit ca04578. `scripts/icons.mjs` lays the files out for the packagers: the .icns for macOS, the .ico for Windows, and for Linux the PNGs in `hicolor/<n>x<n>/apps/`, the SVG in `hicolor/scalable/apps/` and the symbolic SVG in `hicolor/symbolic/apps/`, all named after the app ID `io.github.roxora_os.imager`. |
 | Download proxy | A Cloudflare Worker in [worker/](worker/), for the web version only. |
 | Web version | The same React code with a browser adapter (`src/web/`). The xz decoder, image format checks and the cross-origin isolation service worker come from roxora-os/edk2-webflash (`src/web/webflash/`, `resources/xzwasm/`). |
 
