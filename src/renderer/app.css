@@ -1,61 +1,48 @@
-/* Page CSS on top of PatternFly: the Cockpit look (grey page, plain cards). */
+/* Page CSS on top of PatternFly. Layout comes from PatternFly's Page, Wizard,
+   Stack, Flex and Form; what is here is only what PatternFly has no option for. */
 html, body, #root { height: 100%; }
 
-.brand { display: flex; align-items: center; gap: var(--pf-t--global--spacer--sm); text-decoration: none; }
+/* Masthead: the mark at its own size beside the name (PatternFly sizes the
+   logo slot for a wide wordmark). */
 .pf-v6-c-masthead__logo { --pf-v6-c-masthead__logo--Width: auto; }
+.brand { display: flex; align-items: center; gap: var(--pf-t--global--spacer--sm); text-decoration: none; }
 .brand-mark { height: 1.75rem; width: auto; }
-.brand-name { font-size: var(--pf-t--global--font--size--lg); color: var(--pf-t--global--text--color--regular); }
-.masthead-actions { justify-content: flex-end; }
+/* The masthead column is min-content wide: keep the name on one line. */
+.brand-name { font-size: var(--pf-t--global--font--size--lg); color: var(--pf-t--global--text--color--regular); white-space: nowrap; }
 
-.step-title { margin-bottom: var(--pf-t--global--spacer--xs); font-weight: var(--pf-t--global--font--weight--body--default); }
-.step-lead { margin-bottom: var(--pf-t--global--spacer--md); color: var(--pf-t--global--text--color--subtle); }
-.step-note { margin-top: var(--pf-t--global--spacer--md); color: var(--pf-t--global--text--color--subtle); }
+/* Step content: regular-weight headings, and a readable measure on wide
+   screens (the nav and footer still run the full width). */
+.step { max-width: 72rem; }
+.step .pf-v6-c-title { font-weight: var(--pf-t--global--font--weight--body--default); }
+.step-lead { color: var(--pf-t--global--text--color--subtle); }
 .muted { color: var(--pf-t--global--text--color--subtle); font-size: var(--pf-t--global--font--size--sm); }
-
-.method { display: grid; gap: var(--pf-t--global--spacer--md); margin: var(--pf-t--global--spacer--md) 0 var(--pf-t--global--spacer--lg); }
-.dest-card { margin-bottom: var(--pf-t--global--spacer--md); }
-.dest-card .pf-v6-c-radio + .pf-v6-c-radio { margin-top: var(--pf-t--global--spacer--sm); }
-.file-row { display: flex; align-items: center; gap: var(--pf-t--global--spacer--md); margin: var(--pf-t--global--spacer--sm) 0 0 var(--pf-t--global--spacer--lg); }
-.file-row > .pf-v6-c-button { flex-shrink: 0; }
-.hidden-drives { margin-top: var(--pf-t--global--spacer--md); }
-.hidden-drives ul { margin: 0; padding-left: var(--pf-t--global--spacer--lg); }
-.dest-card .pf-v6-c-code-block { margin-top: var(--pf-t--global--spacer--sm); }
-
-.review { max-width: 52rem; }
-.footer-note { align-self: center; margin-left: var(--pf-t--global--spacer--sm); color: var(--pf-t--global--text--color--subtle); }
-
-.notice { padding-bottom: 0; }
-.run .pf-v6-c-card { max-width: 52rem; }
-.stage + .stage { margin-top: var(--pf-t--global--spacer--md); }
-.result { margin-top: var(--pf-t--global--spacer--lg); }
-.result .detail { font-family: var(--pf-t--global--font--family--mono); font-size: var(--pf-t--global--font--size--sm); word-break: break-all; }
-.log { margin-top: var(--pf-t--global--spacer--lg); }
+.footer-note { align-self: center; color: var(--pf-t--global--text--color--subtle); }
+.detail { font-family: var(--pf-t--global--font--family--mono); font-size: var(--pf-t--global--font--size--sm); word-break: break-all; }
 .log .pf-v6-c-code-block__code { max-height: 18rem; overflow: auto; display: block; }
-.run-actions { padding: 0 var(--pf-t--global--spacer--lg) var(--pf-t--global--spacer--lg); }
 
-.settings { display: grid; gap: var(--pf-t--global--spacer--lg); }
-.settings-label { margin-bottom: var(--pf-t--global--spacer--sm); }
-.usb-choice { display: block; margin-top: var(--pf-t--global--spacer--sm); }
-
-/* Board step: search, then vendors beside boards; below md the vendors are a select. */
-.board-search { max-width: 36rem; margin-bottom: var(--pf-t--global--spacer--md); }
-.board-panes { display: grid; gap: var(--pf-t--global--spacer--lg); }
+/* Board step: one grid. The search spans both columns; below it the vendor
+   list beside the boards table from md, a select above the table below md. */
+.board-grid { display: grid; gap: var(--pf-t--global--spacer--md); grid-template-columns: minmax(0, 1fr); }
 .vendor-pane { display: none; }
-.vendor-select { max-width: 36rem; }
-.vendor-row { display: flex; justify-content: space-between; gap: var(--pf-t--global--spacer--md); width: 100%; }
 .vendor-count { color: var(--pf-t--global--text--color--subtle); font-variant-numeric: tabular-nums; }
-.pf-v6-c-menu__item.pf-m-disabled .vendor-count { color: inherit; }
-.no-match { color: var(--pf-t--global--text--color--subtle); }
 @media (min-width: 48rem) {
-  .board-panes { grid-template-columns: 14rem minmax(0, 1fr); align-items: start; }
-  .vendor-pane { display: block; border-right: var(--pf-t--global--border--width--regular) solid var(--pf-t--global--border--color--default); padding-right: var(--pf-t--global--spacer--sm); }
+  .board-grid { grid-template-columns: 14rem minmax(0, 1fr); column-gap: 0; }
+  .board-search { grid-column: 1 / -1; }
   .vendor-select { display: none; }
+  /* The divider runs the full height of the row, the table's or the list's. */
+  .vendor-pane {
+    display: block;
+    border-inline-end: var(--pf-t--global--border--width--divider--default) solid var(--pf-t--global--border--color--default);
+    padding-inline-end: var(--pf-t--global--spacer--sm);
+  }
+  .board-pane .pf-v6-c-table td.nowrap-md { white-space: nowrap; }
+  /* The list's heading and items as tall as the compact table's head and
+     rows beside them (12px + 8px padding round the head, 8px round a row
+     whose radio makes the line 1.75 high), so the lines run across. */
+  .vendor-pane .pf-v6-c-simple-list {
+    --pf-v6-c-simple-list__title--PaddingBlockStart: calc(var(--pf-t--global--spacer--sm) + var(--pf-t--global--spacer--xs));
+    --pf-v6-c-simple-list__item-link--PaddingBlockStart: var(--pf-t--global--spacer--sm);
+    --pf-v6-c-simple-list__item-link--PaddingBlockEnd: var(--pf-t--global--spacer--sm);
+  }
+  .vendor-pane .pf-v6-c-simple-list__item-link { line-height: 1.75; }
 }
-@media (min-width: 48rem) {
-  .board-pane .pf-v6-c-table .pf-v6-c-table__td.nowrap-md, .board-pane .pf-v6-c-table td.nowrap-md { white-space: nowrap; }
-}
-
-/* Web build: a centred column like the Roxora website (76rem), not the full
-   width of a large screen. The desktop window keeps its own size. */
-html.web .pf-v6-c-page { --pf-v6-c-page--section--m-limit-width--MaxWidth: 76rem; }
-html.web .pf-v6-c-page__main-section.pf-m-limit-width > .pf-v6-c-page__main-body { width: 100%; }

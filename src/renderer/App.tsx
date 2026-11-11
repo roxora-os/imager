@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Button, Card, CardBody, CardHeader, CardTitle, CodeBlock, CodeBlockCode, Content, DescriptionList,
-  DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, EmptyState, EmptyStateBody,
-  EmptyStateFooter, ExpandableSection, Masthead, MastheadBrand, MastheadContent, MastheadLogo, MastheadMain,
-  Modal, ModalBody, ModalFooter, ModalHeader, Page, PageSection, Progress, ProgressMeasureLocation, Radio,
-  SearchInput, Menu, MenuContent, MenuItem, MenuList, FormSelect, FormSelectOption,
-  Spinner, Switch, Title, ToggleGroup, ToggleGroupItem, Wizard, WizardFooterWrapper, WizardStep, useWizardContext,
+  ActionList, ActionListGroup, ActionListItem, Alert, Button, CodeBlock, CodeBlockCode, Content, DescriptionList,
+  DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, EmptyState, EmptyStateActions, EmptyStateBody,
+  EmptyStateFooter, ExpandableSection, Flex, FlexItem, Form, FormGroup, FormSelect, FormSelectOption, Masthead,
+  MastheadBrand, MastheadContent, MastheadLogo, MastheadMain, Modal, ModalBody, ModalFooter, ModalHeader, Page,
+  PageSection, Progress, ProgressMeasureLocation, Radio, SearchInput, SimpleList, SimpleListGroup, SimpleListItem,
+  Spinner, Stack, StackItem, Switch, Title, ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarGroup,
+  ToolbarItem, Wizard, WizardFooterWrapper, WizardStep,
+  useWizardContext,
 } from '@patternfly/react-core';
+import { CogIcon } from '@patternfly/react-icons/dist/esm/icons/cog-icon';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { groupByBoard, type Board, type CatalogImage } from '../shared/catalog';
 import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../shared/boardsearch';
@@ -58,7 +61,11 @@ function releaseWords(img: CatalogImage): string {
   return img.releaseInfo.prerelease ? `Pre-release ${img.releaseInfo.version}` : `Release ${img.releaseInfo.version}`;
 }
 
-/* The page shell: masthead with the mark, a settings button. */
+/*
+ * The page shell, laid out as Fedora's installer (anaconda-webui) does it:
+ * a masthead, then one wizard that fills the rest of the window, its step
+ * nav running the full height and its footer pinned to the bottom.
+ */
 function Shell({ children, onSettings }: { children: React.ReactNode; onSettings: () => void }) {
   const masthead = (
     <Masthead display={{ default: 'inline' }}>
@@ -70,19 +77,43 @@ function Shell({ children, onSettings }: { children: React.ReactNode; onSettings
           </MastheadLogo>
         </MastheadBrand>
       </MastheadMain>
-      <MastheadContent className="masthead-actions">
-        <Button variant="secondary" onClick={onSettings}>Settings</Button>
+      <MastheadContent>
+        <Toolbar isFullHeight isStatic>
+          <ToolbarContent>
+            <ToolbarGroup align={{ default: 'alignEnd' }}>
+              <ToolbarItem>
+                <Button variant="plain" icon={<CogIcon />} onClick={onSettings}>Settings</Button>
+              </ToolbarItem>
+            </ToolbarGroup>
+          </ToolbarContent>
+        </Toolbar>
       </MastheadContent>
     </Masthead>
   );
-  return <Page masthead={masthead}>{children}</Page>;
+  return <Page masthead={masthead} isContentFilled>{children}</Page>;
+}
+
+/** One wizard step's content: title, optional lead, notices, then the step itself. */
+function StepPage({ title, lead, notices, children }: {
+  title: string; lead?: React.ReactNode; notices?: React.ReactNode; children?: React.ReactNode;
+}) {
+  return (
+    <Stack hasGutter className="step">
+      <StackItem>
+        <Title headingLevel="h2">{title}</Title>
+        {lead && <Content component="p" className="step-lead">{lead}</Content>}
+      </StackItem>
+      {notices}
+      {children}
+    </Stack>
+  );
 }
 
 interface FindState { query: string; setQuery: (q: string) => void; vendor: string; setVendor: (v: string) => void }
 
-function BoardStep({ catalog, boards, board, setBoard, reload, find }: {
+function BoardStep({ catalog, boards, board, setBoard, reload, find, notices }: {
   catalog: CatalogResult | null; boards: Board[]; board: string | null;
-  setBoard: (b: string) => void; reload: () => void; find: FindState;
+  setBoard: (b: string) => void; reload: () => void; find: FindState; notices: React.ReactNode;
 }) {
   if (!catalog) return <EmptyState titleText="Loading releases" headingLevel="h2" icon={Spinner} />;
   if (catalog.state === 'error') {
@@ -101,17 +132,28 @@ function BoardStep({ catalog, boards, board, setBoard, reload, find }: {
           write. This list fills itself once the first release is out.
         </EmptyStateBody>
         <EmptyStateFooter>
-          <Button variant="link" isInline component="a" href={RELEASES_URL} target="_blank">Releases on GitHub</Button>
-          <Button variant="secondary" onClick={reload}>Check again</Button>
+          <EmptyStateActions>
+            <Button variant="secondary" onClick={reload}>Check again</Button>
+            <Button variant="link" component="a" href={RELEASES_URL} target="_blank">Releases on GitHub</Button>
+          </EmptyStateActions>
         </EmptyStateFooter>
       </EmptyState>
     );
   }
-  return <BoardPicker boards={boards} board={board} setBoard={setBoard} find={find} />;
+  return (
+    <StepPage title="Board" lead="Choose the board you want to install Roxora on." notices={notices}>
+      <BoardPicker boards={boards} board={board} setBoard={setBoard} find={find} />
+    </StepPage>
+  );
 }
 
 const ALL = '__all';
 
+/*
+ * Search above two panes on one grid: the vendor list (a select below md)
+ * and the boards table. The search spans both panes, so its edges are the
+ * edges of the list and the table.
+ */
 function BoardPicker({ boards, board, setBoard, find }: {
   boards: Board[]; board: string | null; setBoard: (b: string) => void; find: FindState;
 }) {
@@ -134,74 +176,75 @@ function BoardPicker({ boards, board, setBoard, find }: {
   // runs; picking a vendor ends the search.
   const active = searching ? ALL : vendor;
   const pick = (v: string) => { setVendor(v); if (searching) setQuery(''); };
+  const vendorItem = (id: string, name: string, n: number, disabled = false) => (
+    <SimpleListItem key={id} itemId={id} isActive={active === id}
+      componentProps={{ disabled, 'aria-pressed': active === id }}>
+      <Flex justifyContent={{ default: 'justifyContentSpaceBetween' }} flexWrap={{ default: 'nowrap' }}>
+        <FlexItem>{name}</FlexItem>
+        <FlexItem className="vendor-count">{n}</FlexItem>
+      </Flex>
+    </SimpleListItem>
+  );
 
   return (
-    <>
-      <Title headingLevel="h2" className="step-title">Board</Title>
-      <Content component="p" className="step-lead">Choose the board you want to install Roxora on.</Content>
+    <div className="board-grid">
       <div ref={box} onKeyDown={onKeyDown} className="board-search">
         <SearchInput placeholder="Search boards, vendors or SoCs" value={query} aria-label="Search boards, vendors or SoCs"
           onChange={(_e, v) => setQuery(v)} onClear={() => setQuery('')} />
       </div>
-      <div className="board-panes">
-        <div className="vendor-pane">
-          <Menu isPlain activeItemId={active} onSelect={(_e, id) => pick(String(id ?? ALL))} aria-label="Vendors">
-            <MenuContent>
-              <MenuList>
-                <MenuItem itemId={ALL} isActive={active === ALL}>
-                  <span className="vendor-row"><span>All vendors</span><span className="vendor-count">{total}</span></span>
-                </MenuItem>
-                {counts.map((c) => (
-                  <MenuItem key={c.vendor} itemId={c.vendor} isActive={active === c.vendor} isDisabled={searching && c.count === 0}>
-                    <span className="vendor-row"><span>{c.vendor}</span><span className="vendor-count">{c.count}</span></span>
-                  </MenuItem>
-                ))}
-              </MenuList>
-            </MenuContent>
-          </Menu>
-        </div>
-        <div className="vendor-select">
-          <FormSelect value={active} onChange={(_e, v) => pick(v)} aria-label="Vendor">
-            <FormSelectOption value={ALL} label={vendorLabel('All vendors', total)} />
-            {counts.map((c) => (
-              <FormSelectOption key={c.vendor} value={c.vendor} label={vendorLabel(c.vendor, c.count)} isDisabled={searching && c.count === 0} />
-            ))}
-          </FormSelect>
-        </div>
-        <div className="board-pane">
-          {shown.length === 0 ? (
-            <Content component="p" className="no-match">
-              No board matches &ldquo;{query.trim()}&rdquo;.{' '}
-              <Button variant="link" isInline component="a" href={BOARD_REQUEST_URL} target="_blank">Ask for a board to be supported</Button>
-            </Content>
-          ) : (
-            <Table aria-label="Boards" variant="compact">
-              <Thead><Tr><Th screenReaderText="Select" /><Th>Board</Th><Th>SoC</Th><Th>Newest image</Th></Tr></Thead>
-              <Tbody>
-                {shown.map((b, i) => (
-                  <Tr key={b.board} isClickable onRowClick={() => setBoard(b.board)} isRowSelected={board === b.board}>
-                    <Td select={{ rowIndex: i, variant: 'radio', isSelected: board === b.board, onSelect: () => setBoard(b.board) }} />
-                    <Td dataLabel="Board" className="nowrap-md">{b.boardName}</Td>
-                    <Td dataLabel="SoC" className="nowrap-md">{b.soc.toUpperCase()}</Td>
-                    <Td dataLabel="Newest image">{releaseWords(b.images[0])}, {b.images[0].status === 'hardware-tested' ? 'tested on hardware' : 'not yet tested on hardware'}</Td>
-                  </Tr>
-                ))}
-              </Tbody>
-            </Table>
-          )}
-        </div>
+      <div className="vendor-select">
+        <FormSelect value={active} onChange={(_e, v) => pick(v)} aria-label="Vendor">
+          <FormSelectOption value={ALL} label={vendorLabel('All vendors', total)} />
+          {counts.map((c) => (
+            <FormSelectOption key={c.vendor} value={c.vendor} label={vendorLabel(c.vendor, c.count)} isDisabled={searching && c.count === 0} />
+          ))}
+        </FormSelect>
       </div>
-    </>
+      <nav className="vendor-pane" aria-label="Vendors">
+        <SimpleList onSelect={(_ref, props) => pick(String(props.itemId ?? ALL))} isControlled={false}>
+          <SimpleListGroup title="Vendor">
+            {vendorItem(ALL, 'All vendors', total)}
+            {counts.map((c) => vendorItem(c.vendor, c.vendor, c.count, searching && c.count === 0))}
+          </SimpleListGroup>
+        </SimpleList>
+      </nav>
+      <div className="board-pane">
+        {shown.length === 0 ? (
+          <EmptyState titleText={<>No board matches &ldquo;{query.trim()}&rdquo;</>} headingLevel="h3" variant="sm">
+            <EmptyStateFooter>
+              <EmptyStateActions>
+                <Button variant="link" component="a" href={BOARD_REQUEST_URL} target="_blank">Ask for a board to be supported</Button>
+                <Button variant="link" onClick={() => setQuery('')}>Clear the search</Button>
+              </EmptyStateActions>
+            </EmptyStateFooter>
+          </EmptyState>
+        ) : (
+          <Table aria-label="Boards" variant="compact">
+            <Thead><Tr><Th screenReaderText="Select" /><Th>Board</Th><Th>SoC</Th><Th>Newest image</Th></Tr></Thead>
+            <Tbody>
+              {shown.map((b, i) => (
+                <Tr key={b.board} isClickable onRowClick={() => setBoard(b.board)} isRowSelected={board === b.board}>
+                  <Td select={{ rowIndex: i, variant: 'radio', isSelected: board === b.board, onSelect: () => setBoard(b.board) }} />
+                  <Td dataLabel="Board" className="nowrap-md">{b.boardName}</Td>
+                  <Td dataLabel="SoC" className="nowrap-md">{b.soc.toUpperCase()}</Td>
+                  <Td dataLabel="Newest image">{releaseWords(b.images[0])}, {b.images[0].status === 'hardware-tested' ? 'tested on hardware' : 'not yet tested on hardware'}</Td>
+                </Tr>
+              ))}
+            </Tbody>
+          </Table>
+        )}
+      </div>
+    </div>
   );
 }
 
-function ImageStep({ board, imageId, setImage }: { board: Board | undefined; imageId: string | null; setImage: (id: string) => void }) {
+function ImageStep({ board, imageId, setImage, notices }: {
+  board: Board | undefined; imageId: string | null; setImage: (id: string) => void; notices: React.ReactNode;
+}) {
   if (!board) return null;
   const sel = board.images.find((i) => i.id === imageId);
   return (
-    <>
-      <Title headingLevel="h2" className="step-title">Image</Title>
-      <Content component="p" className="step-lead">Images for {board.boardName}, newest first.</Content>
+    <StepPage title="Image" lead={`Images for ${board.boardName}, newest first.`} notices={notices}>
       <Table aria-label="Images" variant="compact">
         <Thead><Tr><Th screenReaderText="Select" /><Th>Release</Th><Th>Ubuntu</Th><Th>Kernel</Th><Th>Download</Th><Th>Status</Th></Tr></Thead>
         <Tbody>
@@ -218,13 +261,13 @@ function ImageStep({ board, imageId, setImage }: { board: Board | undefined; ima
         </Tbody>
       </Table>
       {sel && (
-        <Content component="p" className="step-note">
+        <Content component="p" className="step-lead">
           {statusWords(sel.status)}. {sel.releaseInfo.prerelease
             ? 'Pre-releases have not been through the full hardware test.' : ''}{' '}
           <Button variant="link" isInline component="a" href={sel.releaseInfo.url} target="_blank">Release notes</Button>
         </Content>
       )}
-    </>
+    </StepPage>
   );
 }
 
@@ -263,7 +306,7 @@ function DriversNote() {
 }
 
 function DestinationStep(p: {
-  boardName: string; boardId: string; image: CatalogImage | undefined;
+  boardName: string; boardId: string; image: CatalogImage | undefined; notices: React.ReactNode;
   method: Method; setMethod: (m: Method) => void;
   drives: { targets: Target[]; hidden: HiddenDrive[] } | null; refreshDrives: () => void;
   device: string | null; setDevice: (d: string) => void;
@@ -271,66 +314,51 @@ function DestinationStep(p: {
   source: MaskromSource; setSource: (s: MaskromSource) => void;
   file: PreparedFile | null; pickFile: () => void; picking: boolean; fileError: string | null;
   releaseFile: PreparedFile | null; pickRelease: () => void; checking: string | null;
-  downloadRelease: () => void; proxyError: string | null;
 }) {
   const mb = maskromBoard(p.boardId);
-  // Web: a release file comes through the download proxy when the build has
-  // one. Without it, or when it fails, the user downloads the file and
-  // picks it; either way it is checked against the release.
-  const viaProxy = WEB && !!api.downloadProxy && !p.proxyError;
-  const releasePicker = (what: 'image' | 'spi') => {
-    if (!WEB || p.source !== (what === 'spi' ? 'spi' : 'release')) return null;
-    const f = what === 'spi' ? p.image?.spi : p.image;
-    if (viaProxy) {
-      return (
-        <div className="file-row">
-          <Button variant="secondary" onClick={p.downloadRelease} isLoading={!!p.checking} isDisabled={!!p.checking}>Download from the release</Button>
-          <span>{p.checking ?? (p.releaseFile ? `${p.releaseFile.name}: downloaded, matches the release`
-            : f ? `${f.file}, ${formatBytes(f.size)}, through ${api.downloadProxy}` : '')}</span>
-        </div>
-      );
-    }
-    const why = p.proxyError ?? 'GitHub does not let a web page download release files itself.';
-    return (
-      <div className="file-row">
-        <Button variant="secondary" onClick={p.pickRelease} isLoading={!!p.checking} isDisabled={!!p.checking}>Choose the downloaded file</Button>
-        <span>{p.checking ?? (p.releaseFile ? `${p.releaseFile.name}: matches the release` : (
-          <>{why} Download <Button variant="link" isInline component="a" href={f?.url}>{f?.file}</Button>, then choose it.</>))}</span>
-      </div>
-    );
-  };
-  return (
+  // A file picker under the radio it belongs to, indented like the radio's description.
+  const fileRow = (button: React.ReactNode, text: React.ReactNode) => (
+    <Flex className="file-row" spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
+      <FlexItem>{button}</FlexItem>
+      <FlexItem>{text}</FlexItem>
+    </Flex>
+  );
+  // Web: a release file is downloaded by the user, then picked and checked.
+  const releasePicker = (what: 'image' | 'spi') => WEB && p.source === (what === 'spi' ? 'spi' : 'release') && fileRow(
+    <Button variant="secondary" onClick={p.pickRelease} isLoading={!!p.checking} isDisabled={!!p.checking}>Choose the downloaded file</Button>,
+    p.checking ?? (p.releaseFile ? `${p.releaseFile.name}: matches the release` : (
+      <>Download <Button variant="link" isInline component="a" href={what === 'spi' ? p.image?.spi?.url : p.image?.url}>
+        {what === 'spi' ? p.image?.spi?.file : p.image?.file}</Button> first.</>)),
+  );
+  const lead = WEB ? (
     <>
-      <Title headingLevel="h2" className="step-title">Destination</Title>
-      {WEB ? (
-        <Content component="p" className="web-note">
-          A browser cannot write an SD card or USB drive in this computer; for that use
-          the <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">Roxora Imager desktop app</Button> or <Button variant="link" isInline component="a" href={RPI_IMAGER_URL} target="_blank">Raspberry Pi Imager</Button>.
-          {mb ? ` Here the ${p.boardName} is written over USB in Maskrom mode.` : ` Maskrom writing is not set up for ${p.boardName}.`}
-        </Content>
-      ) : (
-      <div className="method">
-        <Radio id="method-sd" name="method" isChecked={p.method === 'sd'} onChange={() => p.setMethod('sd')}
-          label="SD card or USB drive" description="Write the image to a card or stick in this computer, then boot the board from it." />
-        <Radio id="method-maskrom" name="method" isChecked={p.method === 'maskrom'} onChange={() => p.setMethod('maskrom')}
-          isDisabled={!mb}
-          label="Board storage over USB (Maskrom)"
-          description={mb ? `Through the board's USB-C port: ${mb.storages.map((s) => STORAGES[s].label).join(', or ')}.`
-            : `Maskrom writing is not set up for ${p.boardName}.`} />
-      </div>
+      A browser cannot write an SD card or USB drive in this computer; for that use
+      the <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">Roxora Imager desktop app</Button> or <Button variant="link" isInline component="a" href={RPI_IMAGER_URL} target="_blank">Raspberry Pi Imager</Button>.
+      {mb ? ` Here the ${p.boardName} is written over USB in Maskrom mode.` : ` Maskrom writing is not set up for ${p.boardName}.`}
+    </>
+  ) : undefined;
+  return (
+    <StepPage title="Destination" lead={lead} notices={p.notices}>
+      <Form className="destination" onSubmit={(e) => e.preventDefault()}>
+        {!WEB && (
+          <FormGroup role="radiogroup" fieldId="method" label="Write to" isStack>
+            <Radio id="method-sd" name="method" isChecked={p.method === 'sd'} onChange={() => p.setMethod('sd')}
+              label="SD card or USB drive" description="Write the image to a card or stick in this computer, then boot the board from it." />
+            <Radio id="method-maskrom" name="method" isChecked={p.method === 'maskrom'} onChange={() => p.setMethod('maskrom')}
+              isDisabled={!mb}
+              label="Board storage over USB (Maskrom)"
+              description={mb ? `Through the board's USB-C port: ${mb.storages.map((s) => STORAGES[s].label).join(', or ')}.`
+                : `Maskrom writing is not set up for ${p.boardName}.`} />
+          </FormGroup>
+        )}
 
-      )}
-
-      {p.method === 'sd' && (
-        <Card className="dest-card">
-          <CardHeader actions={{ actions: <Button variant="secondary" onClick={p.refreshDrives}>Refresh</Button>, hasNoOffset: true }}>
-            <CardTitle>Drives</CardTitle>
-          </CardHeader>
-          <CardBody>
+        {p.method === 'sd' && (
+          <FormGroup fieldId="drives" label="Drive"
+            labelInfo={<Button variant="link" isInline onClick={p.refreshDrives}>Refresh</Button>}>
             {!p.drives ? <Spinner size="md" aria-label="Looking for drives" /> : p.drives.targets.length === 0 ? (
               <Content component="p">No SD card or USB drive found. Insert one and click Refresh.</Content>
             ) : (
-              <Table aria-label="Drives" variant="compact">
+              <Table aria-label="Drives" variant="compact" id="drives">
                 <Thead><Tr><Th screenReaderText="Select" /><Th>Drive</Th><Th>Device</Th><Th>Size</Th></Tr></Thead>
                 <Tbody>
                   {p.drives.targets.map((t, i) => (
@@ -349,69 +377,59 @@ function DestinationStep(p: {
               </Table>
             )}
             {p.drives && p.drives.hidden.length > 0 && (
-              <ExpandableSection toggleText={`${p.drives.hidden.length} ${p.drives.hidden.length === 1 ? 'drive is' : 'drives are'} not offered`} className="hidden-drives">
-                <ul>{p.drives.hidden.map((h) => <li key={h.device}>{h.device} {h.description}: {h.reason}</li>)}</ul>
+              <ExpandableSection toggleText={`${p.drives.hidden.length} ${p.drives.hidden.length === 1 ? 'drive is' : 'drives are'} not offered`}>
+                <Content component="ul">{p.drives.hidden.map((h) => <li key={h.device}>{h.device} {h.description}: {h.reason}</li>)}</Content>
               </ExpandableSection>
             )}
-          </CardBody>
-        </Card>
-      )}
+          </FormGroup>
+        )}
 
-      {p.method === 'maskrom' && mb && (
-        <>
-          <Card className="dest-card">
-            <CardTitle>Storage</CardTitle>
-            <CardBody>
+        {p.method === 'maskrom' && mb && (
+          <>
+            <FormGroup role="radiogroup" fieldId="storage" label="Storage" isStack>
               {mb.storages.map((s) => (
                 <Radio key={s} id={`storage-${s}`} name="storage" isChecked={p.storage === s} onChange={() => p.setStorage(s)}
                   label={STORAGES[s].label} description={STORAGES[s].note} />
               ))}
-            </CardBody>
-          </Card>
-          <Card className="dest-card">
-            <CardTitle>What to write</CardTitle>
-            <CardBody>
+            </FormGroup>
+            <FormGroup role="radiogroup" fieldId="source" label="What to write" isStack>
               <Radio id="src-release" name="source" isChecked={p.source === 'release'} onChange={() => p.setSource('release')}
                 isDisabled={!p.storage || !mb.wholeImage.includes(p.storage)}
                 label={p.image ? `The image chosen in the previous step (${p.image.file})` : 'The image chosen in the previous step'}
                 description={p.storage && mb.wholeImage.includes(p.storage) ? undefined
-                  : mb.imageNote ?? `A whole image goes to ${mb.wholeImage.map((s) => STORAGES[s].label).join(' or ')}.`} />
-              {releasePicker('image')}
+                  : mb.imageNote ?? `A whole image goes to ${mb.wholeImage.map((s) => STORAGES[s].label).join(' or ')}.`}
+                body={releasePicker('image') || undefined} />
               {mb.storages.includes('spinor') && (
                 <Radio id="src-spi" name="source" isChecked={p.source === 'spi'} onChange={() => p.setSource('spi')}
                   isDisabled={!p.image?.spi || p.storage !== 'spinor'}
                   label={p.image?.spi ? `This release's SPI bootloader (${p.image.spi.file}, ${formatBytes(p.image.spi.size)})` : "This release's SPI bootloader"}
                   description={!p.image?.spi ? 'This release has no SPI bootloader for the board.'
-                    : viaProxy ? 'Downloaded from the release and checked against its SHA-256, then read back after writing.'
                     : WEB ? 'Checked against the release SHA-256 when you choose it, then read back after writing.'
-                      : 'Downloaded from the release and checked against its SHA-256, then read back after writing.'} />
+                      : 'Downloaded from the release and checked against its SHA-256, then read back after writing.'}
+                  body={releasePicker('spi') || undefined} />
               )}
-              {releasePicker('spi')}
               <Radio id="src-file" name="source" isChecked={p.source === 'file'} onChange={() => p.setSource('file')}
-                label="A file on this computer" description="An image or bootloader file (.img, .bin, or compressed with xz, gzip or bzip2). It is written from the first sector." />
-              {p.source === 'file' && (
-                <div className="file-row">
-                  <Button variant="secondary" onClick={p.pickFile} isLoading={p.picking} isDisabled={p.picking}>Choose file</Button>
-                  <span>{p.file ? `${p.file.name}, ${formatBytes(p.file.size)}` : 'No file chosen'}</span>
-                </div>
-              )}
+                label="A file on this computer" description="An image or bootloader file (.img, .bin, or compressed with xz, gzip or bzip2). It is written from the first sector."
+                body={p.source === 'file' ? fileRow(
+                  <Button variant="secondary" onClick={p.pickFile} isLoading={p.picking} isDisabled={p.picking}>Choose file</Button>,
+                  p.file ? `${p.file.name}, ${formatBytes(p.file.size)}` : 'No file chosen',
+                ) : undefined} />
               {p.fileError && <Alert variant="danger" isInline isPlain title={p.fileError} />}
-            </CardBody>
-          </Card>
-          <Card className="dest-card">
-            <CardTitle>Connect the board in Maskrom mode</CardTitle>
-            <CardBody>
-              <Content component="ol">
-                <li>Disconnect power from the board.</li>
-                <li>Hold the Maskrom button and connect the board's USB-C port to this computer.</li>
-                <li>Release the button after two seconds.</li>
+            </FormGroup>
+            <FormGroup fieldId="connect" label="Connect the board in Maskrom mode">
+              <Content id="connect">
+                <ol>
+                  <li>Disconnect power from the board.</li>
+                  <li>Hold the Maskrom button and connect the board's USB-C port to this computer.</li>
+                  <li>Release the button after two seconds.</li>
+                </ol>
+                <DriversNote />
               </Content>
-              <DriversNote />
-            </CardBody>
-          </Card>
-        </>
-      )}
-    </>
+            </FormGroup>
+          </>
+        )}
+      </Form>
+    </StepPage>
   );
 }
 
@@ -419,53 +437,54 @@ function ReviewFooter({ canWrite, why, onWrite }: { canWrite: boolean; why: stri
   const { goToPrevStep } = useWizardContext();
   return (
     <WizardFooterWrapper>
-      <Button variant="danger" onClick={onWrite} isDisabled={!canWrite}>Erase and write</Button>
-      <Button variant="secondary" onClick={goToPrevStep}>Back</Button>
-      {why && <span className="footer-note">{why}</span>}
+      <ActionList>
+        <ActionListGroup>
+          <ActionListItem><Button variant="secondary" onClick={goToPrevStep}>Back</Button></ActionListItem>
+          <ActionListItem><Button variant="danger" onClick={onWrite} isDisabled={!canWrite}>Erase and write</Button></ActionListItem>
+        </ActionListGroup>
+        {why && <ActionListItem className="footer-note">{why}</ActionListItem>}
+      </ActionList>
     </WizardFooterWrapper>
   );
 }
 
+/* The write itself replaces the wizard, as the installer's progress page does. */
 function RunView({ run, onCancel, onDone, reconnect }: { run: Run; onCancel: () => void; onDone: () => void; reconnect: boolean }) {
   return (
-    <PageSection isWidthLimited={WEB} isCenterAligned={WEB} className="run">
-      <Card>
-        <CardTitle><Title headingLevel="h2">{run.result ? (run.result.ok ? 'Done' : 'Stopped') : 'Writing'}</Title></CardTitle>
-        <CardBody>
-          {run.stages.map((s) => (
-            <div key={s.id} className="stage">
-              <Progress
-                title={s.label + (s.detail ? `: ${s.detail}` : '')}
-                value={s.percent ?? 0}
-                measureLocation={s.percent === null ? ProgressMeasureLocation.none : ProgressMeasureLocation.outside}
-                aria-label={s.label}
-              />
-            </div>
-          ))}
-          {reconnect && !run.result && (
-            <Alert isInline variant="info" title="Choose the board again" className="result"
-              actionLinks={<Button variant="secondary" onClick={() => { navigator.usb.requestDevice({ filters: [{ vendorId: 0x2207 }] }).catch(() => {}); }}>Choose the board</Button>}>
-              The board restarted with the loader. The browser needs you to pick it once more.
-            </Alert>
-          )}
-          {run.result && (
-            <Alert isInline variant={run.result.ok ? 'success' : 'danger'} title={run.result.title} className="result">
-              <p>{run.result.text}</p>
-              {run.result.detail && <p className="detail">{run.result.detail}</p>}
-            </Alert>
-          )}
-          {run.log.length > 0 && (
-            <ExpandableSection toggleText="rkdeveloptool output" className="log">
-              <CodeBlock><CodeBlockCode>{run.log.slice(-400).join('\n')}</CodeBlockCode></CodeBlock>
-            </ExpandableSection>
-          )}
-        </CardBody>
-        <div className="run-actions">
+    <PageSection isFilled aria-label="Writing">
+      <Stack hasGutter className="step">
+        <Title headingLevel="h2">{run.result ? (run.result.ok ? 'Done' : 'Stopped') : 'Writing'}</Title>
+        {run.stages.map((s) => (
+          <Progress key={s.id}
+            title={s.label + (s.detail ? `: ${s.detail}` : '')}
+            value={s.percent ?? 0}
+            measureLocation={s.percent === null ? ProgressMeasureLocation.none : ProgressMeasureLocation.top}
+            aria-label={s.label}
+          />
+        ))}
+        {reconnect && !run.result && (
+          <Alert isInline variant="info" title="Choose the board again"
+            actionLinks={<Button variant="secondary" onClick={() => { navigator.usb.requestDevice({ filters: [{ vendorId: 0x2207 }] }).catch(() => {}); }}>Choose the board</Button>}>
+            The board restarted with the loader. The browser needs you to pick it once more.
+          </Alert>
+        )}
+        {run.result && (
+          <Alert isInline variant={run.result.ok ? 'success' : 'danger'} title={run.result.title}>
+            <p>{run.result.text}</p>
+            {run.result.detail && <p className="detail">{run.result.detail}</p>}
+          </Alert>
+        )}
+        <StackItem>
           {run.result
             ? <Button variant="primary" onClick={onDone}>Write another</Button>
             : <Button variant="secondary" onClick={onCancel}>Cancel</Button>}
-        </div>
-      </Card>
+        </StackItem>
+        {run.log.length > 0 && (
+          <ExpandableSection toggleText="rkdeveloptool output" className="log">
+            <CodeBlock><CodeBlockCode>{run.log.slice(-400).join('\n')}</CodeBlockCode></CodeBlock>
+          </ExpandableSection>
+        )}
+      </Stack>
     </PageSection>
   );
 }
@@ -482,21 +501,20 @@ function SettingsModal({ open, onClose, theme, setTheme }: { open: boolean; onCl
       <ModalHeader title="Settings" labelId="settings-title" />
       <ModalBody>
         {s && (
-          <div className="settings">
+          <Form onSubmit={(e) => e.preventDefault()}>
             {!WEB && (
               <Switch id="set-update" label="Check for a new version once a day" isChecked={s.updateCheck}
                 onChange={(_e, v) => set({ updateCheck: v })} />
             )}
             <Switch id="set-reset" label="Restart the board after a Maskrom write" isChecked={s.resetAfterMaskrom}
               onChange={(_e, v) => set({ resetAfterMaskrom: v })} />
-            <div>
-              <div className="settings-label">Appearance</div>
-              <ToggleGroup aria-label="Appearance">
+            <FormGroup label="Appearance" fieldId="appearance" role="group">
+              <ToggleGroup aria-label="Appearance" id="appearance">
                 {(['system', 'light', 'dark'] as Theme[]).map((t) => (
                   <ToggleGroupItem key={t} text={t[0].toUpperCase() + t.slice(1)} isSelected={theme === t} onChange={() => setTheme(t)} />
                 ))}
               </ToggleGroup>
-            </div>
+            </FormGroup>
             <DescriptionList isCompact isHorizontal>
               <DescriptionListGroup><DescriptionListTerm>Version</DescriptionListTerm><DescriptionListDescription>{api.version}</DescriptionListDescription></DescriptionListGroup>
               <DescriptionListGroup><DescriptionListTerm>License</DescriptionListTerm><DescriptionListDescription>GPL-2.0</DescriptionListDescription></DescriptionListGroup>
@@ -504,7 +522,7 @@ function SettingsModal({ open, onClose, theme, setTheme }: { open: boolean; onCl
                 <Button variant="link" isInline component="a" href="https://github.com/roxora-os/imager" target="_blank">github.com/roxora-os/imager</Button>
               </DescriptionListDescription></DescriptionListGroup>
             </DescriptionList>
-          </div>
+          </Form>
         )}
       </ModalBody>
       <ModalFooter><Button variant="primary" onClick={onClose}>Close</Button></ModalFooter>
@@ -531,7 +549,6 @@ export function App() {
   const [fileError, setFileError] = useState<string | null>(null);
   const [releaseFile, setReleaseFile] = useState<PreparedFile | null>(null);
   const [checking, setChecking] = useState<string | null>(null);
-  const [proxyError, setProxyError] = useState<string | null>(null);
   const [reconnect, setReconnect] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
@@ -600,18 +617,8 @@ export function App() {
     if ('error' in r) { setReleaseFile(null); setFileError(r.error); return; }
     setReleaseFile(r);
   };
-  const downloadRelease = async () => {
-    if (!image || !api.downloadReleaseFile) return;
-    setFileError(null);
-    setChecking('Downloading...');
-    const r = await api.downloadReleaseFile(image.id, source === 'spi' ? 'spi' : 'image',
-      (d, t) => setChecking(`Downloading and checking: ${formatBytes(d)} of ${formatBytes(t)}`));
-    setChecking(null);
-    if ('error' in r) { setReleaseFile(null); setProxyError(r.error); return; }
-    setReleaseFile(r);
-  };
   // A picked release file belongs to one image and one kind.
-  useEffect(() => { setReleaseFile(null); setProxyError(null); }, [imageId, source]);
+  useEffect(() => { setReleaseFile(null); }, [imageId, source]);
 
   const target = drives?.targets.find((t) => t.device === device);
   const destReady = method === 'sd' ? !!target
@@ -725,55 +732,53 @@ export function App() {
 
   const finishRun = () => { setRun(null); setDevice(null); };
 
-  return (
-    <Shell onSettings={() => setSettings(true)}>
+  // Notices that concern the whole app sit at the top of every step, under its title.
+  const notices = (update || sample || (WEB && !('usb' in navigator))) ? (
+    <>
       {update && (
-        <PageSection isWidthLimited={WEB} isCenterAligned={WEB} className="notice">
-          <Alert isInline variant="info" title={`Roxora Imager ${update.version} is available`}
-            actionLinks={<Button variant="link" isInline component="a" href={update.url} target="_blank">Release page</Button>} />
-        </PageSection>
+        <Alert isInline variant="info" title={`Roxora Imager ${update.version} is available`}
+          actionLinks={<Button variant="link" isInline component="a" href={update.url} target="_blank">Release page</Button>} />
       )}
       {WEB && !('usb' in navigator) && (
-        <PageSection isWidthLimited={WEB} isCenterAligned={WEB} className="notice">
-          <Alert isInline variant="warning" title="This browser cannot reach USB devices">
-            Writing over USB needs WebUSB, which Chrome, Edge and other Chromium browsers have. Or use
-            the <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">desktop app</Button>.
-          </Alert>
-        </PageSection>
+        <Alert isInline variant="warning" title="This browser cannot reach USB devices">
+          Writing over USB needs WebUSB, which Chrome, Edge and other Chromium browsers have. Or use
+          the <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">desktop app</Button>.
+        </Alert>
       )}
       {sample && (
-        <PageSection isWidthLimited={WEB} isCenterAligned={WEB} className="notice">
-          <Alert isInline variant="warning" title="Sample data">
-            These entries come from the sample catalog in the release contract. The releases do not exist and nothing
-            can be written.{' '}
-            <Button variant="link" isInline onClick={() => setUseSample(false)}>Load the real releases</Button>
-          </Alert>
-        </PageSection>
+        <Alert isInline variant="warning" title="Sample data"
+          actionLinks={<Button variant="link" isInline onClick={() => setUseSample(false)}>Load the real releases</Button>}>
+          These entries come from the sample catalog in the release contract. The releases do not exist and nothing
+          can be written.
+        </Alert>
       )}
+    </>
+  ) : null;
+
+  return (
+    <Shell onSettings={() => setSettings(true)}>
       {run ? <RunView run={run} onCancel={cancel} onDone={finishRun} reconnect={reconnect} /> : (
-        <PageSection isWidthLimited={WEB} isCenterAligned={WEB} isFilled type="wizard" aria-label="Write an image">
+        <PageSection type="wizard" isFilled hasBodyWrapper={false} aria-label="Write an image">
           <Wizard navAriaLabel="Steps" isVisitRequired onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
             <WizardStep name="Board" id="board" footer={{ isNextDisabled: !board, isCancelHidden: true }}>
               <BoardStep catalog={catalog} boards={boards} board={board} setBoard={chooseBoard} reload={load}
-                find={{ query, setQuery, vendor, setVendor }} />
+                find={{ query, setQuery, vendor, setVendor }} notices={notices} />
             </WizardStep>
             <WizardStep name="Image" id="image" isDisabled={!board} footer={{ isNextDisabled: !imageId, isCancelHidden: true }}>
-              <ImageStep board={cur} imageId={imageId} setImage={setImageId} />
+              <ImageStep board={cur} imageId={imageId} setImage={setImageId} notices={notices} />
             </WizardStep>
             <WizardStep name="Destination" id="dest" isDisabled={!imageId} footer={{ isNextDisabled: !destReady, isCancelHidden: true, nextButtonText: 'Review' }}>
-              <DestinationStep boardName={cur?.boardName ?? ''} boardId={board ?? ''} image={image}
+              <DestinationStep boardName={cur?.boardName ?? ''} boardId={board ?? ''} image={image} notices={notices}
                 method={method} setMethod={(m) => { setMethod(m); if (m === 'sd') refreshDrives(); }}
                 drives={drives} refreshDrives={refreshDrives} device={device} setDevice={setDevice}
                 storage={storage} setStorage={(s) => { setStorage(s); setSource(mb?.wholeImage.includes(s) ? 'release' : s === 'spinor' && image?.spi ? 'spi' : 'file'); }}
                 source={source} setSource={setSource} file={file} pickFile={pickFile} picking={picking} fileError={fileError}
-                releaseFile={releaseFile} pickRelease={pickRelease} checking={checking}
-                downloadRelease={downloadRelease} proxyError={proxyError} />
+                releaseFile={releaseFile} pickRelease={pickRelease} checking={checking} />
             </WizardStep>
             <WizardStep name="Review" id="review" isDisabled={!destReady}
               footer={<ReviewFooter canWrite={!why} why={why} onWrite={onWrite} />}>
-              <Title headingLevel="h2" className="step-title">Review</Title>
-              <Content component="p" className="step-lead">Nothing has been written yet. Check this before you go on.</Content>
-              <DescriptionList isHorizontal className="review">
+              <StepPage title="Review" lead="Nothing has been written yet. Check this before you go on." notices={notices}>
+              <DescriptionList isHorizontal>
                 <DescriptionListGroup><DescriptionListTerm>Board</DescriptionListTerm><DescriptionListDescription>{cur?.boardName}</DescriptionListDescription></DescriptionListGroup>
                 {(method === 'sd' || source === 'release') && image && (
                   <>
@@ -785,7 +790,7 @@ export function App() {
                   <DescriptionListGroup><DescriptionListTerm>SPI bootloader</DescriptionListTerm><DescriptionListDescription>{image.spi.file}, {formatBytes(image.spi.size)}, from {releaseWords(image).toLowerCase()}</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {WEB && source !== 'file' && releaseFile && (
-                  <DescriptionListGroup><DescriptionListTerm>Release file</DescriptionListTerm><DescriptionListDescription>{releaseFile.name}, matches the release SHA-256</DescriptionListDescription></DescriptionListGroup>
+                  <DescriptionListGroup><DescriptionListTerm>Chosen file</DescriptionListTerm><DescriptionListDescription>{releaseFile.name}, matches the release SHA-256</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {method === 'maskrom' && source === 'file' && file && (
                   <DescriptionListGroup><DescriptionListTerm>File</DescriptionListTerm><DescriptionListDescription>{file.name}, {formatBytes(file.size)}</DescriptionListDescription></DescriptionListGroup>
@@ -801,6 +806,7 @@ export function App() {
                     : 'After writing, the storage is read back and compared with the file.'}
                 </DescriptionListDescription></DescriptionListGroup>
               </DescriptionList>
+              </StepPage>
             </WizardStep>
           </Wizard>
         </PageSection>
@@ -818,12 +824,16 @@ export function App() {
       <Modal isOpen={!!usbChoices} onClose={() => { api.answerUsbChoice(''); setUsbChoices(null); }} variant="small" aria-labelledby="usb-title">
         <ModalHeader title="Several Rockchip devices are connected" labelId="usb-title" />
         <ModalBody>
-          <Content component="p">Choose the board to write, or disconnect the others.</Content>
-          {usbChoices?.map((c) => (
-            <Button key={c.deviceId} variant="secondary" className="usb-choice" onClick={() => { api.answerUsbChoice(c.deviceId); setUsbChoices(null); }}>
-              {c.productName || 'Rockchip device'} (product 0x{c.productId.toString(16)})
-            </Button>
-          ))}
+          <Stack hasGutter>
+            <Content component="p">Choose the board to write, or disconnect the others.</Content>
+            {usbChoices?.map((c) => (
+              <StackItem key={c.deviceId}>
+                <Button variant="secondary" onClick={() => { api.answerUsbChoice(c.deviceId); setUsbChoices(null); }}>
+                  {c.productName || 'Rockchip device'} (product 0x{c.productId.toString(16)})
+                </Button>
+              </StackItem>
+            ))}
+          </Stack>
         </ModalBody>
       </Modal>
 
