@@ -32,7 +32,7 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     };
     await shot('1-board');
     // A vendor selected: the menu on wide windows, the select on narrow ones.
-    if (w >= 768) await page.click('.vendor-pane button:has-text("Radxa")');
+    if (w >= 768) await page.click('.vendor-list button:has-text("Radxa")');
     else await page.selectOption('.vendor-select select', 'Radxa');
     await shot('1-board-vendor');
     await page.fill('.board-search input', 'rock 4d');

@@ -16,33 +16,19 @@ html, body, #root { height: 100%; }
 .step .pf-v6-c-title { font-weight: var(--pf-t--global--font--weight--body--default); }
 .step-lead { color: var(--pf-t--global--text--color--subtle); }
 .muted { color: var(--pf-t--global--text--color--subtle); font-size: var(--pf-t--global--font--size--sm); }
-.footer-note { align-self: center; color: var(--pf-t--global--text--color--subtle); }
+.footer-note { color: var(--pf-t--global--text--color--subtle); }
 .detail { font-family: var(--pf-t--global--font--family--mono); font-size: var(--pf-t--global--font--size--sm); word-break: break-all; }
 .log .pf-v6-c-code-block__code { max-height: 18rem; overflow: auto; display: block; }
 
-/* Board step: one grid. The search spans both columns; below it the vendor
-   list beside the boards table from md, a select above the table below md. */
-.board-grid { display: grid; gap: var(--pf-t--global--spacer--md); grid-template-columns: minmax(0, 1fr); }
-.vendor-pane { display: none; }
+/* Board step: the vendor list from md, a select below it. */
+.vendor-list { display: none; }
 .vendor-count { color: var(--pf-t--global--text--color--subtle); font-variant-numeric: tabular-nums; }
 @media (min-width: 48rem) {
-  .board-grid { grid-template-columns: 14rem minmax(0, 1fr); column-gap: 0; }
-  .board-search { grid-column: 1 / -1; }
   .vendor-select { display: none; }
-  /* The divider runs the full height of the row, the table's or the list's. */
-  .vendor-pane {
-    display: block;
-    border-inline-end: var(--pf-t--global--border--width--divider--default) solid var(--pf-t--global--border--color--default);
-    padding-inline-end: var(--pf-t--global--spacer--sm);
-  }
-  .board-pane .pf-v6-c-table td.nowrap-md { white-space: nowrap; }
-  /* The list's heading and items as tall as the compact table's head and
-     rows beside them (12px + 8px padding round the head, 8px round a row
-     whose radio makes the line 1.75 high), so the lines run across. */
-  .vendor-pane .pf-v6-c-simple-list {
-    --pf-v6-c-simple-list__title--PaddingBlockStart: calc(var(--pf-t--global--spacer--sm) + var(--pf-t--global--spacer--xs));
-    --pf-v6-c-simple-list__item-link--PaddingBlockStart: var(--pf-t--global--spacer--sm);
-    --pf-v6-c-simple-list__item-link--PaddingBlockEnd: var(--pf-t--global--spacer--sm);
-  }
-  .vendor-pane .pf-v6-c-simple-list__item-link { line-height: 1.75; }
+  .vendor-list { display: block; }
+  .pf-v6-c-table td.nowrap-md { white-space: nowrap; }
 }
+
+/* PatternFly leaves focus to the browser's outline (inset on a search box);
+   give it PatternFly's focus colour instead of the system accent. */
+:focus-visible { outline-color: var(--pf-t--global--focus-ring--color--default); }
