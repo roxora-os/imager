@@ -32,7 +32,7 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     };
     await shot('1-board');
     // A vendor selected: the menu on wide windows, the select on narrow ones.
-    if (w >= 768) await page.click('.vendor-pane .pf-v6-c-menu__item:has-text("Radxa")');
+    if (w >= 768) await page.click('.vendor-pane button:has-text("Radxa")');
     else await page.selectOption('.vendor-select select', 'Radxa');
     await shot('1-board-vendor');
     await page.fill('.board-search input', 'rock 4d');
@@ -44,7 +44,7 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     await page.click('.pf-v6-c-wizard__footer button:has-text("Next")');
     await shot('2-image');
     await page.click('.pf-v6-c-wizard__footer button:has-text("Next")');
-    await page.waitForSelector('.dest-card');
+    await page.waitForSelector('text=SanDisk');
     await shot('3-destination-sd');
     await page.click('text=SanDisk');
     await page.click('.pf-v6-c-wizard__footer button:has-text("Review")');
@@ -54,6 +54,9 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     await shot('3-destination-maskrom');
     await page.locator('#src-spi').scrollIntoViewIfNeeded();
     await shot('3-destination-maskrom-source');
+    await page.click('.pf-v6-c-masthead button:has-text("Settings")');
+    await page.waitForSelector('#settings-title');
+    await shot('5-settings');
     await app.close();
   }
 }
