@@ -41,6 +41,8 @@ const RPI_IMAGER_URL = 'https://www.raspberrypi.com/software/';
 
 type Method = 'sd' | 'maskrom';
 type MaskromSource = 'release' | 'spi' | 'file';
+/** A release file being downloaded or checked: what, and how far. */
+interface Checking { label: string; done: number; total: number }
 
 interface Run {
   kind: Method;
@@ -319,22 +321,54 @@ function DestinationStep(p: {
   storage: StorageId | null; setStorage: (s: StorageId) => void;
   source: MaskromSource; setSource: (s: MaskromSource) => void;
   file: PreparedFile | null; pickFile: () => void; picking: boolean; fileError: string | null;
-  releaseFile: PreparedFile | null; pickRelease: () => void; checking: string | null;
+  releaseFile: PreparedFile | null; pickRelease: () => void; checking: Checking | null;
+  downloadRelease: () => void; proxyError: string | null;
 }) {
   const mb = maskromBoard(p.boardId);
   // A file picker under the radio it belongs to, indented like the radio's description.
   const fileRow = (button: React.ReactNode, text: React.ReactNode) => (
     <Flex className="file-row" spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
-      <FlexItem>{button}</FlexItem>
+      <FlexItem flex={{ default: 'flexNone' }}>{button}</FlexItem>
       <FlexItem>{text}</FlexItem>
     </Flex>
   );
-  // Web: a release file is downloaded by the user, then picked and checked.
-  const releasePicker = (what: 'image' | 'spi') => WEB && p.source === (what === 'spi' ? 'spi' : 'release') && fileRow(
-    <Button variant="secondary" onClick={p.pickRelease} isLoading={!!p.checking} isDisabled={!!p.checking}>Choose the downloaded file</Button>,
-    p.checking ?? (p.releaseFile ? `${p.releaseFile.name}: matches the release` : (
-      <>Download <Button variant="link" isInline component="a" href={what === 'spi' ? p.image?.spi?.url : p.image?.url}>
-        {what === 'spi' ? p.image?.spi?.file : p.image?.file}</Button> first.</>)),
+  // Web: a release file comes through the download proxy when the build has
+  // one. Without it, or when it fails, the user downloads the file and
+  // picks it (the alert under the title says how); either way it is
+  // checked against the release, with a progress bar while that runs.
+  const viaProxy = WEB && !!api.downloadProxy && !p.proxyError;
+  const releaseKind = WEB && mb && (p.source === 'spi' ? 'spi' : p.source === 'release' ? 'image' : null);
+  const relFile = releaseKind === 'spi' ? p.image?.spi : releaseKind === 'image' ? p.image : undefined;
+  const releasePicker = (what: 'image' | 'spi') => {
+    if (releaseKind !== what) return undefined;
+    if (p.checking) {
+      return (
+        <Progress size="sm" title={p.checking.label} measureLocation={ProgressMeasureLocation.top}
+          value={p.checking.total ? Math.floor(p.checking.done * 100 / p.checking.total) : 0}
+          label={p.checking.total ? `${formatBytes(p.checking.done)} of ${formatBytes(p.checking.total)}` : undefined} />
+      );
+    }
+    if (viaProxy) {
+      return fileRow(
+        <Button variant="secondary" onClick={p.downloadRelease}>Download from the release</Button>,
+        p.releaseFile ? `${p.releaseFile.name}: downloaded, matches the release`
+          : relFile ? `${relFile.file}, ${formatBytes(relFile.size)}, through ${api.downloadProxy}` : '',
+      );
+    }
+    return fileRow(
+      <Button variant="secondary" onClick={p.pickRelease}>Choose the downloaded file</Button>,
+      p.releaseFile ? `${p.releaseFile.name}: matches the release` : 'No file chosen',
+    );
+  };
+  // When the proxy download fails the reason is up under the title: bring it into view.
+  const byHandRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { if (p.proxyError) byHandRef.current?.scrollIntoView({ block: 'nearest' }); }, [p.proxyError]);
+  const byHand = !!relFile && !viaProxy && !p.releaseFile && (
+    <Alert ref={byHandRef} isInline variant={p.proxyError ? 'warning' : 'info'} title="Download the release file by hand">
+      {p.proxyError ?? 'GitHub does not let a web page download release files itself.'} Download it, then
+      choose it under What to write:{' '}
+      <Button variant="link" isInline component="a" href={relFile.url}>{relFile.file}</Button>
+    </Alert>
   );
   const lead = WEB ? (
     <>
@@ -344,7 +378,7 @@ function DestinationStep(p: {
     </>
   ) : undefined;
   return (
-    <StepPage title="Destination" lead={lead}>
+    <StepPage title="Destination" lead={lead} notices={byHand || undefined}>
       <Form className="destination" onSubmit={(e) => e.preventDefault()}>
         {!WEB && (
           <FormGroup role="radiogroup" fieldId="method" label="Write to" isStack>
@@ -404,15 +438,16 @@ function DestinationStep(p: {
                 label={p.image ? `The image chosen in the previous step (${p.image.file})` : 'The image chosen in the previous step'}
                 description={p.storage && mb.wholeImage.includes(p.storage) ? undefined
                   : mb.imageNote ?? `A whole image goes to ${mb.wholeImage.map((s) => STORAGES[s].label).join(' or ')}.`}
-                body={releasePicker('image') || undefined} />
+                body={releasePicker('image')} />
               {mb.storages.includes('spinor') && (
                 <Radio id="src-spi" name="source" isChecked={p.source === 'spi'} onChange={() => p.setSource('spi')}
                   isDisabled={!p.image?.spi || p.storage !== 'spinor'}
                   label={p.image?.spi ? `This release's SPI bootloader (${p.image.spi.file}, ${formatBytes(p.image.spi.size)})` : "This release's SPI bootloader"}
                   description={!p.image?.spi ? 'This release has no SPI bootloader for the board.'
+                    : viaProxy ? 'Downloaded from the release and checked against its SHA-256, then read back after writing.'
                     : WEB ? 'Checked against the release SHA-256 when you choose it, then read back after writing.'
                       : 'Downloaded from the release and checked against its SHA-256, then read back after writing.'}
-                  body={releasePicker('spi') || undefined} />
+                  body={releasePicker('spi')} />
               )}
               <Radio id="src-file" name="source" isChecked={p.source === 'file'} onChange={() => p.setSource('file')}
                 label="A file on this computer" description="An image or bootloader file (.img, .bin, or compressed with xz, gzip or bzip2). It is written from the first sector."
@@ -564,7 +599,8 @@ export function App() {
   const [picking, setPicking] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
   const [releaseFile, setReleaseFile] = useState<PreparedFile | null>(null);
-  const [checking, setChecking] = useState<string | null>(null);
+  const [checking, setChecking] = useState<Checking | null>(null);
+  const [proxyError, setProxyError] = useState<string | null>(null);
   const [reconnect, setReconnect] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
@@ -625,16 +661,26 @@ export function App() {
   const pickRelease = async () => {
     if (!image || !api.pickReleaseFile) return;
     setFileError(null);
-    setChecking('Checking the file against the release...');
+    setChecking({ label: 'Checking the file against the release', done: 0, total: 0 });
     const r = await api.pickReleaseFile(image.id, source === 'spi' ? 'spi' : 'image',
-      (d, t) => setChecking(`Checking the file against the release: ${Math.floor(d * 100 / t)}%`));
+      (d, t) => setChecking({ label: 'Checking the file against the release', done: d, total: t }));
     setChecking(null);
     if (!r) return;
     if ('error' in r) { setReleaseFile(null); setFileError(r.error); return; }
     setReleaseFile(r);
   };
+  const downloadRelease = async () => {
+    if (!image || !api.downloadReleaseFile) return;
+    setFileError(null);
+    setChecking({ label: 'Downloading and checking', done: 0, total: 0 });
+    const r = await api.downloadReleaseFile(image.id, source === 'spi' ? 'spi' : 'image',
+      (d, t) => setChecking({ label: 'Downloading and checking', done: d, total: t }));
+    setChecking(null);
+    if ('error' in r) { setReleaseFile(null); setProxyError(r.error); return; }
+    setReleaseFile(r);
+  };
   // A picked release file belongs to one image and one kind.
-  useEffect(() => { setReleaseFile(null); }, [imageId, source]);
+  useEffect(() => { setReleaseFile(null); setProxyError(null); }, [imageId, source]);
 
   const target = drives?.targets.find((t) => t.device === device);
   const destReady = method === 'sd' ? !!target
@@ -794,7 +840,8 @@ export function App() {
                 drives={drives} refreshDrives={refreshDrives} device={device} setDevice={setDevice}
                 storage={storage} setStorage={(s) => { setStorage(s); setSource(mb?.wholeImage.includes(s) ? 'release' : s === 'spinor' && image?.spi ? 'spi' : 'file'); }}
                 source={source} setSource={setSource} file={file} pickFile={pickFile} picking={picking} fileError={fileError}
-                releaseFile={releaseFile} pickRelease={pickRelease} checking={checking} />
+                releaseFile={releaseFile} pickRelease={pickRelease} checking={checking}
+                downloadRelease={downloadRelease} proxyError={proxyError} />
             </WizardStep>
             <WizardStep name="Review" id="review" isDisabled={!destReady}
               footer={<ReviewFooter canWrite={!why} why={why} onWrite={onWrite} />}>
@@ -812,7 +859,7 @@ export function App() {
                   <DescriptionListGroup><DescriptionListTerm>SPI bootloader</DescriptionListTerm><DescriptionListDescription>{image.spi.file}, {formatBytes(image.spi.size)}, from {releaseWords(image).toLowerCase()}</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {WEB && source !== 'file' && releaseFile && (
-                  <DescriptionListGroup><DescriptionListTerm>Chosen file</DescriptionListTerm><DescriptionListDescription>{releaseFile.name}, matches the release SHA-256</DescriptionListDescription></DescriptionListGroup>
+                  <DescriptionListGroup><DescriptionListTerm>Release file</DescriptionListTerm><DescriptionListDescription>{releaseFile.name}, matches the release SHA-256</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {method === 'maskrom' && source === 'file' && file && (
                   <DescriptionListGroup><DescriptionListTerm>File</DescriptionListTerm><DescriptionListDescription>{file.name}, {formatBytes(file.size)}</DescriptionListDescription></DescriptionListGroup>
