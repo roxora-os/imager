@@ -32,6 +32,10 @@ try {
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
   const runOne = (picked) => page.evaluate(async ({ size, sha, picked }) => {
+    // The app's own loader path: built from rkbin on first use, kept in the
+    // user data folder, served at app://local/loader/.
+    const loader = await window.imager.getLoader('rk3576_spl_loader.bin');
+    if ('error' in loader) return { picked, loaderError: loader.error };
     const w = new Worker('fake-flash-worker.js', { type: 'module' });
     const stages = [];
     let lastWrite = -1;
@@ -45,7 +49,7 @@ try {
       };
       const o = location.origin;
       const go = (src) => w.postMessage({ type: 'start', moduleUrl: `${o}/wasm/rkdeveloptool.js`, wasmUrl: `${o}/wasm/rkdeveloptool.wasm`,
-        loaderUrl: `${o}/resources/rk3576_spl_loader.bin`, xzWasmUrl: `${o}/resources/xzwasm/xzwasm.wasm`, size, sha256: sha,
+        loaderUrl: loader.url, xzWasmUrl: `${o}/resources/xzwasm/xzwasm.wasm`, size, sha256: sha,
         storageCode: 1, storageLabel: 'eMMC', verify: true, resetAfter: true, ...src });
       if (picked) {
         fetch(`${o}/file/xz`).then((r) => r.blob()).then((b) => go({ file: new File([b], 'image.img.xz') }));

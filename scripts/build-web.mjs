@@ -35,7 +35,8 @@ await build({ ...web, entryPoints: { 'maskrom-worker': 'src/maskrom/worker.ts' }
 cpSync('src/web/index.html', `${out}/index.html`);
 cpSync('src/web/coi-serviceworker.js', `${out}/coi-serviceworker.js`);
 cpSync('src/renderer/theme.js', `${out}/theme.js`);
-for (const f of ['rk3576_spl_loader.bin', 'roxora-mark.svg', 'sample-catalog.json', 'xzwasm/xzwasm.wasm']) {
+// Rockchip's loader is not copied: the page builds it from rkbin (src/maskrom/loaders.ts).
+for (const f of ['roxora-mark.svg', 'sample-catalog.json', 'xzwasm/xzwasm.wasm']) {
   cpSync(`resources/${f}`, `${out}/resources/${f}`);
 }
 if (!existsSync('vendor/rkdeveloptool-wasm/rkdeveloptool.wasm')) {

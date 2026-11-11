@@ -14,6 +14,7 @@ import {
 } from '../shared/catalog';
 import type { CatalogResult, ImagerApi, PreparedFile } from '../shared/ipc';
 import { downloadVerified, proxyBase, proxyUrl, releaseFile } from './proxy';
+import { buildLoader, isPinnedLoader, LOADERS } from '../maskrom/loaders';
 
 declare const __APP_VERSION__: string;
 declare const __DOWNLOAD_PROXY__: string;
@@ -143,6 +144,39 @@ export async function fetchReleaseFile(
   }
 }
 
+// The Maskrom loader, built in the page from Rockchip's rkbin files
+// (raw.githubusercontent.com sends CORS headers, so no proxy is needed) and
+// kept in the browser's Cache Storage so it is downloaded once.
+const loaderUrls = new Map<string, string>();
+async function webLoader(name: string): Promise<{ url: string } | { error: string }> {
+  const pin = LOADERS[name];
+  if (!pin) return { error: `No loader is known by the name ${name}.` };
+  const known = loaderUrls.get(name);
+  if (known) return { url: known };
+  const key = new URL(`loader-cache/${pin.sha256}/${name}`, location.href).href;
+  let data: Uint8Array | null = null;
+  let cache: Cache | null = null;
+  try {
+    cache = await caches.open('roxora-loaders');
+    const hit = await cache.match(key);
+    if (hit) {
+      const d = new Uint8Array(await hit.arrayBuffer());
+      if (isPinnedLoader(pin, d)) data = d;
+    }
+  } catch { /* no Cache Storage: build it every time */ }
+  if (!data) {
+    try {
+      data = await buildLoader(pin);
+    } catch (e) {
+      return { error: (e as Error).message };
+    }
+    try { await cache?.put(key, new Response(data as BlobPart)); } catch { /* quota: fine */ }
+  }
+  const url = URL.createObjectURL(new Blob([data as BlobPart], { type: 'application/octet-stream' }));
+  loaderUrls.set(name, url);
+  return { url };
+}
+
 export const webApi: ImagerApi = {
   platform: 'web',
   version: typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev',
@@ -178,6 +212,7 @@ export const webApi: ImagerApi = {
   },
   downloadProxy: DOWNLOAD_PROXY ? new URL(DOWNLOAD_PROXY).host : null,
   downloadReleaseFile: (imageId, what, onProgress) => fetchReleaseFile(DOWNLOAD_PROXY, writable.get(imageId), what, onProgress),
+  getLoader: webLoader,
   releaseMaskrom: async () => {},
   onUsbChoice: () => () => {},
   answerUsbChoice: () => {},

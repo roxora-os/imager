@@ -11,6 +11,12 @@ curl -fsSL https://raw.githubusercontent.com/roxora-os/imager/main/install.sh | 
 The script picks the package for the system and checks the download against
 the SHA-256 GitHub publishes for it.
 
+The packages do not include Rockchip's Maskrom loader. The first Maskrom
+write downloads its pieces from Rockchip's rkbin repository
+(raw.githubusercontent.com), checks them against pinned SHA-256 sums and keeps
+the loader in the app's user data folder (`loaders/`), so that first write
+needs an internet connection.
+
 The packages are not signed with a paid certificate, so each system warns
 the first time.
 

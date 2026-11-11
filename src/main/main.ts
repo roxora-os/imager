@@ -1,7 +1,7 @@
 // The Electron main process: the window, the app:// protocol, WebUSB access
 // for the Maskrom worker, and everything that touches disks or the network.
 
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme, session, shell, type WebContents } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, session, shell, type WebContents } from 'electron';
 import { join } from 'node:path';
 import * as drivelist from 'drivelist';
 import { classifyDrives, type DriveInfo } from '../shared/targets';
@@ -9,6 +9,7 @@ import type { JobProgress, JobResult, PreparedFile } from '../shared/ipc';
 import { loadReleases, loadSample, writableImage, type CatalogState } from './catalog-source';
 import { helperLaunch, runHelper, sudoPromptElevate } from './elevate';
 import { decompress, detectCompression, fetchImage, forgetFile, serveFile, serveFileAs } from './images';
+import { ensureLoader } from './loader-cache';
 import { handleProtocol, ORIGIN, registerScheme } from './protocol';
 import { loadSettings, saveSettings } from './settings';
 import { checkForUpdate } from './updater';
@@ -26,6 +27,8 @@ const HIDDEN = process.env.ROXORA_IMAGER_HIDDEN === '1';
 const appDir = app.getAppPath();
 const resourcesDir = join(appDir, 'resources');
 const cacheDir = () => join(app.getPath('userData'), 'images');
+// Rockchip's Maskrom loaders, built from rkbin on first use (loader-cache.ts).
+const loaderDir = () => join(app.getPath('userData'), 'loaders');
 
 const WRITER = process.platform === 'win32' ? 'roxora-imager-writer.exe' : 'roxora-imager-writer';
 function writerPath(): string {
@@ -193,6 +196,15 @@ ipcMain.handle('maskrom:pick', async (e) => {
   }
 });
 
+ipcMain.handle('maskrom:loader', async (_e, name: string) => {
+  try {
+    await ensureLoader(loaderDir(), name, (url) => net.fetch(url));
+    return { url: `${ORIGIN}/loader/${encodeURIComponent(name)}` };
+  } catch (err) {
+    return { error: String((err as Error).message ?? err) };
+  }
+});
+
 ipcMain.handle('maskrom:release', (_e, token: string) => {
   forgetFile(token, temporary.delete(token));
 });
@@ -225,7 +237,7 @@ ipcMain.on('app:info', (e) => {
 ipcMain.on('theme', (_e, t: 'light' | 'dark') => { nativeTheme.themeSource = t; });
 
 app.whenReady().then(() => {
-  handleProtocol(join(appDir, 'build', 'renderer'), resourcesDir);
+  handleProtocol(join(appDir, 'build', 'renderer'), resourcesDir, loaderDir());
   // Unpackaged builds only: let the WebUSB smoke test (scripts/usb-smoke.mjs)
   // reach a device that is not a Rockchip board, and serve it a test file.
   const testVid = !app.isPackaged ? Number(process.env.ROXORA_IMAGER_USB_TEST_VID ?? NaN) : NaN;

@@ -56,6 +56,13 @@ export interface ImagerApi {
    */
   downloadReleaseFile?(imageId: string, what: 'image' | 'spi', onProgress: (done: number, total: number) => void):
     Promise<PreparedFile | { error: string }>;
+  /**
+   * The Maskrom loader `name` (boards.ts) as a URL the Maskrom worker can
+   * fetch. Built from Rockchip's rkbin files on first use and checked
+   * against its pin (maskrom/loaders.ts); the desktop app keeps it in its
+   * user data folder.
+   */
+  getLoader(name: string): Promise<{ url: string } | { error: string }>;
   releaseMaskrom(token: string): Promise<void>;
   onUsbChoice(cb: (choices: { deviceId: string; productName?: string; productId: number }[]) => void): () => void;
   answerUsbChoice(deviceId: string): void;

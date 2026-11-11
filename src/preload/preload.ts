@@ -17,6 +17,7 @@ const api: ImagerApi = {
   },
   prepareMaskrom: (imageId, what) => ipcRenderer.invoke('maskrom:prepare', imageId, what ?? 'image'),
   pickMaskromFile: () => ipcRenderer.invoke('maskrom:pick'),
+  getLoader: (name) => ipcRenderer.invoke('maskrom:loader', name),
   releaseMaskrom: (token) => ipcRenderer.invoke('maskrom:release', token),
   onUsbChoice: (cb) => {
     const h = (_e: unknown, c: Parameters<typeof cb>[0]) => cb(c);

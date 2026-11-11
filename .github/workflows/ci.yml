@@ -34,6 +34,8 @@ jobs:
       - run: npm run typecheck
       - name: Unit tests (catalog, targets, Maskrom through the WASM against a pretend board)
         run: npm test
+      - name: Maskrom loader built from rkbin matches its pin
+        run: node scripts/check-loader.mjs
       - name: Tests of the modules copied from edk2-webflash (xz, image source)
         run: node --test test/webflash/*.test.js
       - name: Web build

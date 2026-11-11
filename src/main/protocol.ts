@@ -4,13 +4,15 @@
 //
 // app://local/file/<token> serves an image file the main process prepared
 // for the Maskrom worker, with Range requests, so the worker reads it in
-// pieces and never holds it whole.
+// pieces and never holds it whole. app://local/loader/<name> serves the
+// Maskrom loader from the user data folder once it matches its pin.
 
 import { protocol } from 'electron';
 import { createReadStream, readFileSync } from 'node:fs';
 import { extname, join, normalize, sep } from 'node:path';
 import { Readable } from 'node:stream';
 import { servedFile } from './images';
+import { cachedLoader } from './loader-cache';
 
 export const SCHEME = 'app';
 export const ORIGIN = 'app://local';
@@ -58,7 +60,7 @@ export function parseRange(h: string | null, size: number): { start: number; end
   return { start, end };
 }
 
-export function handleProtocol(rendererDir: string, resourcesDir: string): void {
+export function handleProtocol(rendererDir: string, resourcesDir: string, loaderDir: string): void {
   protocol.handle(SCHEME, async (req) => {
     const url = new URL(req.url);
     if (url.host !== 'local') return new Response('not found', { status: 404 });
@@ -81,7 +83,13 @@ export function handleProtocol(rendererDir: string, resourcesDir: string): void 
       });
     }
 
-    // Static files: the renderer build, and the loader from resources/.
+    if (path.startsWith('/loader/')) {
+      const data = cachedLoader(loaderDir, path.slice('/loader/'.length));
+      if (!data) return new Response('not found', { status: 404, headers: SECURITY });
+      return new Response(data as BlobPart, { headers: { ...SECURITY, 'Content-Type': 'application/octet-stream' } });
+    }
+
+    // Static files: the renderer build, and resources/.
     const base = path.startsWith('/resources/') ? resourcesDir : rendererDir;
     const rel = path.startsWith('/resources/') ? path.slice('/resources/'.length) : path.slice(1) || 'index.html';
     const full = normalize(join(base, rel));

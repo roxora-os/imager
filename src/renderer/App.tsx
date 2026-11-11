@@ -18,6 +18,7 @@ import { formatBytes, statusWords } from '../shared/format';
 import type { CatalogResult, ImagerApi, JobProgress, PreparedFile } from '../shared/ipc';
 import type { HiddenDrive, Target } from '../shared/targets';
 import { maskromBoard, STORAGES, type StorageId } from '../maskrom/boards';
+import { RKBIN_HOST } from '../maskrom/loaders';
 import type { Stage } from '../maskrom/sequence';
 import { startMaskrom, type MaskromJob } from './maskrom-client';
 import { readTheme, applyTheme, type Theme } from './theme';
@@ -38,6 +39,8 @@ declare const __APP_HAS_RELEASE__: boolean;
 const DESKTOP_URL = typeof __APP_HAS_RELEASE__ !== 'undefined' && !__APP_HAS_RELEASE__
   ? 'https://github.com/roxora-os/imager#install' : 'https://github.com/roxora-os/imager/releases';
 const RPI_IMAGER_URL = 'https://www.raspberrypi.com/software/';
+// Rockchip's loader is not shipped with the app (maskrom/loaders.ts).
+const LOADER_NOTE = `The first Maskrom write downloads Rockchip's loader from ${RKBIN_HOST} (rockchip-linux/rkbin) and checks it.`;
 
 type Method = 'sd' | 'maskrom';
 type MaskromSource = 'release' | 'spi' | 'file';
@@ -374,7 +377,7 @@ function DestinationStep(p: {
     <>
       A browser cannot write an SD card or USB drive in this computer; for that use
       the <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">Roxora Imager desktop app</Button> or <Button variant="link" isInline component="a" href={RPI_IMAGER_URL} target="_blank">Raspberry Pi Imager</Button>.
-      {mb ? ` Here the ${p.boardName} is written over USB in Maskrom mode.` : ` Maskrom writing is not set up for ${p.boardName}.`}
+      {mb ? ` Here the ${p.boardName} is written over USB in Maskrom mode. ${LOADER_NOTE}` : ` Maskrom writing is not set up for ${p.boardName}.`}
     </>
   ) : undefined;
   return (
@@ -387,7 +390,7 @@ function DestinationStep(p: {
             <Radio id="method-maskrom" name="method" isChecked={p.method === 'maskrom'} onChange={() => p.setMethod('maskrom')}
               isDisabled={!mb}
               label="Board storage over USB (Maskrom)"
-              description={mb ? `Through the board's USB-C port: ${mb.storages.map((s) => STORAGES[s].label).join(', or ')}.`
+              description={mb ? `Through the board's USB-C port: ${mb.storages.map((s) => STORAGES[s].label).join(', or ')}. ${LOADER_NOTE}`
                 : `Maskrom writing is not set up for ${p.boardName}.`} />
           </FormGroup>
         )}
@@ -750,9 +753,18 @@ export function App() {
     }
     if (!prepared) return;
     setStage('prepare', { percent: 100, detail: undefined });
+    // Rockchip's loader is not shipped: built from rkbin on first use.
+    setStage('loader', { percent: null, detail: "getting Rockchip's loader" });
+    const loader = await api.getLoader(mb.loader);
+    if ('error' in loader) {
+      if (source !== 'file') api.releaseMaskrom(prepared.token);
+      finish({ ok: false, title: loader.error, text: 'Nothing was written.' });
+      return;
+    }
+    setStage('loader', { percent: null, detail: undefined });
     const settingsNow = await api.getSettings();
     const job = startMaskrom({
-      loader: mb.loader, size: prepared.size, sha256: prepared.sha256,
+      loaderUrl: loader.url, size: prepared.size, sha256: prepared.sha256,
       ...(prepared.file ? { file: prepared.file, reconnectTimeout: 180000 } : { fileUrl: prepared.url }),
       storageCode: st.code, storageLabel: st.label, verify: true, resetAfter: settingsNow.resetAfterMaskrom,
     }, {

@@ -58,6 +58,7 @@ What each system asks on first start, and the drivers for Maskrom writing:
 | Image list | The releases of roxora-os/build and the `roxora-catalog.json` in each, as described in its [release contract](https://github.com/roxora-os/build/blob/main/docs/release-contract.md). The website reads the same releases. |
 | SD/USB writing | [etcher-sdk](https://github.com/balena-io-modules/etcher-sdk), in a helper process started with administrator rights the way Etcher starts its writer. |
 | Maskrom writing | rkdeveloptool compiled to WebAssembly with libusb's WebUSB backend, as in [edk2-webflash](https://github.com/gahingwoo/edk2-webflash), running in a worker inside the app. |
+| Maskrom loader | Not shipped. The first Maskrom write downloads the pieces from Rockchip's [rkbin](https://github.com/rockchip-linux/rkbin) at a pinned commit (raw.githubusercontent.com), checks each against a pinned SHA-256, and builds the loader the way rkbin's boot_merger does (`src/maskrom/loader-merge.ts`, ported from RKDevelopTool-GUI). The result must match the SHA-256 of Rockchip's own build of that loader (`src/maskrom/loaders.ts`). The desktop app keeps it in its user data folder (`loaders/`), the web version in the browser's cache storage. Without a connection the write stops before anything is written and says so. |
 | Interface | Electron, React and [PatternFly](https://www.patternfly.org/). |
 | Download proxy | A Cloudflare Worker in [worker/](worker/), for the web version only. |
 | Web version | The same React code with a browser adapter (`src/web/`). The xz decoder, image format checks and the cross-origin isolation service worker come from roxora-os/edk2-webflash (`src/web/webflash/`, `resources/xzwasm/`). |
@@ -111,5 +112,5 @@ are tested by hand: [docs/hardware-test.md](docs/hardware-test.md).
 ## License
 
 GPL-2.0. rkdeveloptool is GPL-2.0-or-later, libusb LGPL-2.1, etcher-sdk
-Apache-2.0. The RK3576 loader in `resources/` is the one edk2-webflash
-ships.
+Apache-2.0. Rockchip's loader is not part of this repository or of the
+packages; it is downloaded from rkbin when it is first needed.

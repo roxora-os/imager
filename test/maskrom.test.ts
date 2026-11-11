@@ -10,12 +10,14 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createHash, randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 import { FakeBoard } from './fake-rockchip';
+import { syntheticLoader } from './synthetic-loader';
 import { createRunner } from '../src/maskrom/runner';
 import { flash, parseFlashSize, parseList, type FlashPlan, type Hooks } from '../src/maskrom/sequence';
 
 const WASM_DIR = new URL('../vendor/rkdeveloptool-wasm/', import.meta.url);
 const haveWasm = existsSync(new URL('rkdeveloptool.wasm', WASM_DIR));
-const loader = readFileSync(new URL('../resources/rk3576_spl_loader.bin', import.meta.url));
+// rkdeveloptool parses the loader, so it must be one; built from random bytes.
+const loader = syntheticLoader();
 
 const MiB = 1024 * 1024;
 
