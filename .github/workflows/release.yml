@@ -86,6 +86,15 @@ jobs:
           nfpm package -f packaging/nfpm.yaml -p deb -t dist/
           nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
           ls -l dist/
+      - name: What the packages carry (icons, desktop entry, metainfo; no Rockchip loader)
+        run: |
+          node scripts/check-package.mjs dist/app
+          dpkg-deb -c dist/*.deb | grep -E 'share/(icons|applications|metainfo)/' | awk '{print $NF}'
+          if dpkg-deb -c dist/*.deb | grep -iE 'spl_loader|usbplug|rkbin'; then echo "FAIL: Rockchip loader in the .deb"; exit 1; fi
+          APPIMAGE_EXTRACT_AND_RUN=1 ./dist/*.AppImage --appimage-extract > /dev/null
+          node scripts/check-package.mjs squashfs-root
+          ls squashfs-root/*.desktop squashfs-root/usr/share/icons/hicolor/*/apps/ 2>/dev/null || true
+          rm -rf squashfs-root
       # A healthy app keeps running until timeout kills it (124). Anything
       # else means it exited on its own and never opened its window.
       - name: Smoke-test the AppImage on this runner
@@ -100,6 +109,13 @@ jobs:
           sudo apt-get install -y ./dist/*.deb
           test -u /opt/roxora-imager/chrome-sandbox
           test -f /usr/lib/udev/rules.d/70-roxora-imager.rules
+          for f in /usr/share/icons/hicolor/{16x16,24x24,32x32,48x48,64x64,128x128,256x256,512x512}/apps/io.github.roxora_os.imager.png \
+                   /usr/share/icons/hicolor/scalable/apps/io.github.roxora_os.imager.svg \
+                   /usr/share/icons/hicolor/symbolic/apps/io.github.roxora_os.imager-symbolic.svg; do
+            test -f "$f" || { echo "FAIL: missing $f"; exit 1; }
+          done
+          desktop-file-validate /usr/share/applications/io.github.roxora_os.imager.desktop
+          appstreamcli validate --no-net /usr/share/metainfo/io.github.roxora_os.imager.metainfo.xml
           set +e
           timeout 30 xvfb-run -a roxora-imager > /tmp/deb.log 2>&1
           rc=$?
@@ -181,6 +197,13 @@ jobs:
         run: bash packaging/macos-sign.sh app "dist/${{ matrix.out }}/Roxora Imager.app"
       - name: Confirm the architecture
         run: file "dist/${{ matrix.out }}/Roxora Imager.app/Contents/MacOS/"*
+      - name: Icon and no Rockchip loader in the app
+        run: |
+          node scripts/check-package.mjs "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Resources"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Info.plist"
+          cmp build-res/icon.icns "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Resources/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Info.plist")"
+          echo "OK: the bundle's icon is the design .icns"
+
       - name: Create the DMG
         run: |
           V=$(node -p "require('./package.json').version")
@@ -246,6 +269,8 @@ jobs:
       # Unsigned: SmartScreen will warn. See docs/install.md.
       - name: Installer and zip
         run: npx electron-builder --win nsis zip --x64 --publish never
+      - name: Icon and no Rockchip loader in the app
+        run: node scripts/check-package.mjs dist/win-unpacked
       - name: Name the zip
         run: |
           V=$(node -p "require('./package.json').version")
