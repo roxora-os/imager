@@ -107,7 +107,23 @@ filler", the write may be fine; note N and whether the board boots.
 Pass: "Written and verified"; after restart the board starts the bootloader
 from SPI NOR (serial console), and with S2's card inserted boots Roxora.
 
-### M4. Windows: driver
+### M4. SD card in the board (untested on RK3576)
+
+The loader is asked to switch to the board's SD card slot with
+rkdeveloptool's `cs 2` (its usage text: "ChangeStorage: cs [storage: 1=EMMC,
+2=SD, 9=SPINOR]"). Nobody has tried this on RK3576 yet.
+
+1. Put a card in the board's slot, enter Maskrom mode.
+2. Choose the board, the newest image, Board storage over USB, "SD card in
+   the board", "The image chosen in the previous step".
+3. Review, Erase and write, confirm.
+
+Pass: either "Written and verified" and the board boots Roxora from the
+card, or "The board did not switch to SD card in the board. Nothing was
+written." Record which; with the second, check with another tool that the
+eMMC or SPI NOR was not touched.
+
+### M5. Windows: driver
 
 1. On a Windows PC that never had a Rockchip driver, put the board in
    Maskrom mode and run M2.
@@ -118,15 +134,43 @@ Pass: M2 passes after Zadig. Record whether Device Manager showed the board
 as an unknown device before Zadig. (Whether the app can install WinUSB
 itself through libwdi is not built yet; this test is the baseline for that.)
 
-### M5. macOS
+### M6. macOS
 
 Run M2 and M3 on macOS (Apple silicon, and Intel if available).
 
 Pass: as in M2 and M3, with no driver installed.
 
-### M6. Several boards
+### M7. Several boards
 
 1. Connect two boards in Maskrom mode and run M2.
 
 Pass: the app says more than one Rockchip device is connected (or asks
 which one), and writes nothing until only one is left.
+
+## Web version
+
+At https://roxora-os.github.io/imager/ in Chrome or Edge.
+
+### W1. Pages and isolation
+
+1. Open the page, then open the browser console and run `crossOriginIsolated`.
+
+Pass: `true` after the page reloaded once (coi-serviceworker.js).
+
+### W2. CM5-IO eMMC from the browser
+
+1. Download the CM5-IO `.img.xz` from the release page.
+2. Choose the board, the image, "The image chosen in the previous step",
+   "Choose the downloaded file", pick the download.
+3. Review, Erase and write; the browser asks for the device: pick it.
+4. When the page says "Choose the board again", click it and pick the board
+   once more.
+
+Pass: the file is accepted ("matches the release"), the write ends with
+"Written and verified" as in M2. Note the time it took.
+
+### W3. ROCK 4D SPI from the browser
+
+As M3 with "This release's SPI bootloader" and its downloaded `-spi.img`.
+
+Pass: as M3.

@@ -20,8 +20,15 @@ import { readTheme, applyTheme, type Theme } from './theme';
 
 declare global {
   interface Window { imager: ImagerApi }
+  interface Navigator {
+    usb: { requestDevice(o: { filters: { vendorId: number }[] }): Promise<unknown>; getDevices(): Promise<unknown[]> };
+  }
 }
 const api = window.imager;
+// The web build writes over Maskrom only: a browser cannot open a disk.
+const WEB = api.platform === 'web';
+const DESKTOP_URL = 'https://github.com/roxora-os/imager/releases';
+const RPI_IMAGER_URL = 'https://www.raspberrypi.com/software/';
 
 type Method = 'sd' | 'maskrom';
 type MaskromSource = 'release' | 'spi' | 'file';
@@ -217,6 +224,16 @@ function ImageStep({ board, imageId, setImage }: { board: Board | undefined; ima
 }
 
 function DriversNote() {
+  if (WEB) {
+    return (
+      <Content component="p">
+        On Windows the board needs the WinUSB driver: install it once
+        with <Button variant="link" isInline component="a" href="https://zadig.akeo.ie/" target="_blank">Zadig</Button> (the
+        device with ID 2207, WinUSB, Install Driver). On Linux your user needs access to the device, for example
+        through a udev rule for vendor 2207 with TAG+="uaccess". macOS needs nothing.
+      </Content>
+    );
+  }
   if (api.platform === 'win32') {
     return (
       <Content component="p">
@@ -248,20 +265,39 @@ function DestinationStep(p: {
   storage: StorageId | null; setStorage: (s: StorageId) => void;
   source: MaskromSource; setSource: (s: MaskromSource) => void;
   file: PreparedFile | null; pickFile: () => void; picking: boolean; fileError: string | null;
+  releaseFile: PreparedFile | null; pickRelease: () => void; checking: string | null;
 }) {
   const mb = maskromBoard(p.boardId);
+  // Web: a release file is downloaded by the user, then picked and checked.
+  const releasePicker = (what: 'image' | 'spi') => WEB && p.source === (what === 'spi' ? 'spi' : 'release') && (
+    <div className="file-row">
+      <Button variant="secondary" onClick={p.pickRelease} isLoading={!!p.checking} isDisabled={!!p.checking}>Choose the downloaded file</Button>
+      <span>{p.checking ?? (p.releaseFile ? `${p.releaseFile.name}: matches the release` : (
+        <>Download <Button variant="link" isInline component="a" href={what === 'spi' ? p.image?.spi?.url : p.image?.url}>
+          {what === 'spi' ? p.image?.spi?.file : p.image?.file}</Button> first.</>))}</span>
+    </div>
+  );
   return (
     <>
       <Title headingLevel="h2" className="step-title">Destination</Title>
+      {WEB ? (
+        <Content component="p" className="web-note">
+          A browser cannot write an SD card or USB drive in this computer; for that use
+          the <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">Roxora Imager desktop app</Button> or <Button variant="link" isInline component="a" href={RPI_IMAGER_URL} target="_blank">Raspberry Pi Imager</Button>.
+          {mb ? ` Here the ${p.boardName} is written over USB in Maskrom mode.` : ` Maskrom writing is not set up for ${p.boardName}.`}
+        </Content>
+      ) : (
       <div className="method">
         <Radio id="method-sd" name="method" isChecked={p.method === 'sd'} onChange={() => p.setMethod('sd')}
           label="SD card or USB drive" description="Write the image to a card or stick in this computer, then boot the board from it." />
         <Radio id="method-maskrom" name="method" isChecked={p.method === 'maskrom'} onChange={() => p.setMethod('maskrom')}
           isDisabled={!mb}
           label="Board storage over USB (Maskrom)"
-          description={mb ? `Write ${mb.storages.map((s) => STORAGES[s].label).join(' or ')} on the ${p.boardName} through its USB-C port.`
+          description={mb ? `Through the board's USB-C port: ${mb.storages.map((s) => STORAGES[s].label).join(', or ')}.`
             : `Maskrom writing is not set up for ${p.boardName}.`} />
       </div>
+
+      )}
 
       {p.method === 'sd' && (
         <Card className="dest-card">
@@ -314,16 +350,20 @@ function DestinationStep(p: {
             <CardTitle>What to write</CardTitle>
             <CardBody>
               <Radio id="src-release" name="source" isChecked={p.source === 'release'} onChange={() => p.setSource('release')}
-                isDisabled={mb.imageStorage === null || p.storage !== mb.imageStorage}
+                isDisabled={!p.storage || !mb.wholeImage.includes(p.storage)}
                 label={p.image ? `The image chosen in the previous step (${p.image.file})` : 'The image chosen in the previous step'}
-                description={mb.imageStorage === null ? mb.imageNote : p.storage !== mb.imageStorage ? `A whole image goes to ${STORAGES[mb.imageStorage].label}.` : undefined} />
+                description={p.storage && mb.wholeImage.includes(p.storage) ? undefined
+                  : mb.imageNote ?? `A whole image goes to ${mb.wholeImage.map((s) => STORAGES[s].label).join(' or ')}.`} />
+              {releasePicker('image')}
               {mb.storages.includes('spinor') && (
                 <Radio id="src-spi" name="source" isChecked={p.source === 'spi'} onChange={() => p.setSource('spi')}
                   isDisabled={!p.image?.spi || p.storage !== 'spinor'}
                   label={p.image?.spi ? `This release's SPI bootloader (${p.image.spi.file}, ${formatBytes(p.image.spi.size)})` : "This release's SPI bootloader"}
                   description={!p.image?.spi ? 'This release has no SPI bootloader for the board.'
-                    : 'Downloaded from the release and checked against its SHA-256, then read back after writing.'} />
+                    : WEB ? 'Checked against the release SHA-256 when you choose it, then read back after writing.'
+                      : 'Downloaded from the release and checked against its SHA-256, then read back after writing.'} />
               )}
+              {releasePicker('spi')}
               <Radio id="src-file" name="source" isChecked={p.source === 'file'} onChange={() => p.setSource('file')}
                 label="A file on this computer" description="An image or bootloader file (.img, .bin, or compressed with xz, gzip or bzip2). It is written from the first sector." />
               {p.source === 'file' && (
@@ -363,7 +403,7 @@ function ReviewFooter({ canWrite, why, onWrite }: { canWrite: boolean; why: stri
   );
 }
 
-function RunView({ run, onCancel, onDone }: { run: Run; onCancel: () => void; onDone: () => void }) {
+function RunView({ run, onCancel, onDone, reconnect }: { run: Run; onCancel: () => void; onDone: () => void; reconnect: boolean }) {
   return (
     <PageSection className="run">
       <Card>
@@ -379,6 +419,12 @@ function RunView({ run, onCancel, onDone }: { run: Run; onCancel: () => void; on
               />
             </div>
           ))}
+          {reconnect && !run.result && (
+            <Alert isInline variant="info" title="Choose the board again" className="result"
+              actionLinks={<Button variant="secondary" onClick={() => { navigator.usb.requestDevice({ filters: [{ vendorId: 0x2207 }] }).catch(() => {}); }}>Choose the board</Button>}>
+              The board restarted with the loader. The browser needs you to pick it once more.
+            </Alert>
+          )}
           {run.result && (
             <Alert isInline variant={run.result.ok ? 'success' : 'danger'} title={run.result.title} className="result">
               <p>{run.result.text}</p>
@@ -414,8 +460,10 @@ function SettingsModal({ open, onClose, theme, setTheme }: { open: boolean; onCl
       <ModalBody>
         {s && (
           <div className="settings">
-            <Switch id="set-update" label="Check for a new version once a day" isChecked={s.updateCheck}
-              onChange={(_e, v) => set({ updateCheck: v })} />
+            {!WEB && (
+              <Switch id="set-update" label="Check for a new version once a day" isChecked={s.updateCheck}
+                onChange={(_e, v) => set({ updateCheck: v })} />
+            )}
             <Switch id="set-reset" label="Restart the board after a Maskrom write" isChecked={s.resetAfterMaskrom}
               onChange={(_e, v) => set({ resetAfterMaskrom: v })} />
             <div>
@@ -450,7 +498,7 @@ export function App() {
   const [query, setQuery] = useState('');
   const [vendor, setVendor] = useState('__all');
   const [imageId, setImageId] = useState<string | null>(null);
-  const [method, setMethod] = useState<Method>('sd');
+  const [method, setMethod] = useState<Method>(WEB ? 'maskrom' : 'sd');
   const [drives, setDrives] = useState<{ targets: Target[]; hidden: HiddenDrive[] } | null>(null);
   const [device, setDevice] = useState<string | null>(null);
   const [storage, setStorage] = useState<StorageId | null>(null);
@@ -458,6 +506,9 @@ export function App() {
   const [file, setFile] = useState<PreparedFile | null>(null);
   const [picking, setPicking] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [releaseFile, setReleaseFile] = useState<PreparedFile | null>(null);
+  const [checking, setChecking] = useState<string | null>(null);
+  const [reconnect, setReconnect] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const [settings, setSettings] = useState(false);
@@ -514,11 +565,25 @@ export function App() {
     setFile(r);
   };
 
+  const pickRelease = async () => {
+    if (!image || !api.pickReleaseFile) return;
+    setFileError(null);
+    setChecking('Checking the file against the release...');
+    const r = await api.pickReleaseFile(image.id, source === 'spi' ? 'spi' : 'image',
+      (d, t) => setChecking(`Checking the file against the release: ${Math.floor(d * 100 / t)}%`));
+    setChecking(null);
+    if (!r) return;
+    if ('error' in r) { setReleaseFile(null); setFileError(r.error); return; }
+    setReleaseFile(r);
+  };
+  // A picked release file belongs to one image and one kind.
+  useEffect(() => { setReleaseFile(null); }, [imageId, source]);
+
   const target = drives?.targets.find((t) => t.device === device);
   const destReady = method === 'sd' ? !!target
     : !!storage && (source === 'file' ? !!file
-      : source === 'spi' ? !!image?.spi && storage === 'spinor'
-        : !!image && mb?.imageStorage === storage);
+      : source === 'spi' ? !!image?.spi && storage === 'spinor' && (!WEB || !!releaseFile)
+        : !!image && !!mb?.wholeImage.includes(storage) && (!WEB || !!releaseFile));
 
   let why: string | null = null;
   if (sample) why = 'Sample data cannot be written.';
@@ -526,7 +591,7 @@ export function App() {
 
   const erased = method === 'sd'
     ? (target ? `Everything on ${target.description} (${target.device}, ${formatBytes(target.size)}).` : '')
-    : (storage && mb ? `Everything on the ${STORAGES[storage].label} of the ${mb.boardName} connected over USB.` : '');
+    : (storage && mb ? `Everything on the ${storage === 'sd' ? 'SD card in the board' : STORAGES[storage].label} (${mb.boardName}, connected over USB).` : '');
 
   const startSd = async () => {
     if (!image || !target) return;
@@ -571,8 +636,8 @@ export function App() {
       setRun((cur) => cur && { ...cur, stages: cur.stages.map((s) => (s.id === id ? { ...s, ...patch } : s)) });
     const finish = (result: Run['result']) => setRun((cur) => cur && { ...cur, result });
 
-    let prepared = file;
-    if ((source === 'release' || source === 'spi') && image) {
+    let prepared = source === 'file' ? file : WEB ? releaseFile : null;
+    if (!WEB && (source === 'release' || source === 'spi') && image) {
       const off = api.onProgress((p) => setStage('prepare', { percent: p.total ? Math.min(100, Math.floor(p.bytes * 100 / p.total)) : null, detail: p.stage }));
       const res = await api.prepareMaskrom(image.id, source === 'spi' ? 'spi' : 'image');
       off();
@@ -583,19 +648,24 @@ export function App() {
     setStage('prepare', { percent: 100, detail: undefined });
     const settingsNow = await api.getSettings();
     const job = startMaskrom({
-      loader: mb.loader, fileUrl: prepared.url, size: prepared.size, sha256: prepared.sha256,
+      loader: mb.loader, size: prepared.size, sha256: prepared.sha256,
+      ...(prepared.file ? { file: prepared.file, reconnectTimeout: 180000 } : { fileUrl: prepared.url }),
       storageCode: st.code, storageLabel: st.label, verify: true, resetAfter: settingsNow.resetAfterMaskrom,
     }, {
       log: (line) => setRun((cur) => cur && { ...cur, log: [...cur.log, line] }),
       stage: (s: Stage) => {
         if (s === 'loader' || s === 'reconnect') setStage('loader', { percent: null, detail: s === 'reconnect' ? 'waiting for the board' : undefined });
-        if (s === 'storage') setStage('loader', { percent: 100, detail: undefined });
+        // A browser forgets the board when it restarts in Loader mode; it has
+        // to be chosen again (the desktop app finds it by itself).
+        if (s === 'reconnect' && WEB) setReconnect(true);
+        if (s === 'storage') { setReconnect(false); setStage('loader', { percent: 100, detail: undefined }); }
       },
       progress: (s, pct) => { if (s === 'write' || s === 'verify') setStage(s, { percent: pct }); },
     });
     maskromJob.current = job;
     const res = await job.done;
     maskromJob.current = null;
+    setReconnect(false);
     if (source !== 'file') api.releaseMaskrom(prepared.token);
     finish(res.ok
       ? { ok: true, title: 'Written and verified', text: `${prepared.name} is on the ${st.label}. The read-back matches (SHA-256 ${res.sha256}).${settingsNow.resetAfterMaskrom ? ' The board is restarting.' : ''}` }
@@ -605,7 +675,14 @@ export function App() {
   const onWrite = () => setConfirm(true);
   const doWrite = () => {
     setConfirm(false);
-    if (method === 'sd') startSd(); else startMaskromWrite();
+    if (method === 'sd') { startSd(); return; }
+    if (WEB) {
+      // WebUSB only shows devices the user picked; this click is the gesture.
+      navigator.usb.requestDevice({ filters: [{ vendorId: 0x2207 }] })
+        .then(() => startMaskromWrite(), () => setFileError('No board was chosen. Connect it in Maskrom mode and try again.'));
+      return;
+    }
+    startMaskromWrite();
   };
   const cancel = () => {
     if (maskromJob.current) maskromJob.current.cancel();
@@ -622,6 +699,14 @@ export function App() {
             actionLinks={<Button variant="link" isInline component="a" href={update.url} target="_blank">Release page</Button>} />
         </PageSection>
       )}
+      {WEB && !('usb' in navigator) && (
+        <PageSection className="notice">
+          <Alert isInline variant="warning" title="This browser cannot reach USB devices">
+            Writing over USB needs WebUSB, which Chrome, Edge and other Chromium browsers have. Or use
+            the <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">desktop app</Button>.
+          </Alert>
+        </PageSection>
+      )}
       {sample && (
         <PageSection className="notice">
           <Alert isInline variant="warning" title="Sample data">
@@ -631,7 +716,7 @@ export function App() {
           </Alert>
         </PageSection>
       )}
-      {run ? <RunView run={run} onCancel={cancel} onDone={finishRun} /> : (
+      {run ? <RunView run={run} onCancel={cancel} onDone={finishRun} reconnect={reconnect} /> : (
         <PageSection isFilled type="wizard" aria-label="Write an image">
           <Wizard navAriaLabel="Steps" isVisitRequired onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
             <WizardStep name="Board" id="board" footer={{ isNextDisabled: !board, isCancelHidden: true }}>
@@ -645,8 +730,9 @@ export function App() {
               <DestinationStep boardName={cur?.boardName ?? ''} boardId={board ?? ''} image={image}
                 method={method} setMethod={(m) => { setMethod(m); if (m === 'sd') refreshDrives(); }}
                 drives={drives} refreshDrives={refreshDrives} device={device} setDevice={setDevice}
-                storage={storage} setStorage={(s) => { setStorage(s); setSource(s === mb?.imageStorage ? 'release' : s === 'spinor' && image?.spi ? 'spi' : 'file'); }}
-                source={source} setSource={setSource} file={file} pickFile={pickFile} picking={picking} fileError={fileError} />
+                storage={storage} setStorage={(s) => { setStorage(s); setSource(mb?.wholeImage.includes(s) ? 'release' : s === 'spinor' && image?.spi ? 'spi' : 'file'); }}
+                source={source} setSource={setSource} file={file} pickFile={pickFile} picking={picking} fileError={fileError}
+                releaseFile={releaseFile} pickRelease={pickRelease} checking={checking} />
             </WizardStep>
             <WizardStep name="Review" id="review" isDisabled={!destReady}
               footer={<ReviewFooter canWrite={!why} why={why} onWrite={onWrite} />}>
@@ -662,6 +748,9 @@ export function App() {
                 )}
                 {method === 'maskrom' && source === 'spi' && image?.spi && (
                   <DescriptionListGroup><DescriptionListTerm>SPI bootloader</DescriptionListTerm><DescriptionListDescription>{image.spi.file}, {formatBytes(image.spi.size)}, from {releaseWords(image).toLowerCase()}</DescriptionListDescription></DescriptionListGroup>
+                )}
+                {WEB && source !== 'file' && releaseFile && (
+                  <DescriptionListGroup><DescriptionListTerm>Chosen file</DescriptionListTerm><DescriptionListDescription>{releaseFile.name}, matches the release SHA-256</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {method === 'maskrom' && source === 'file' && file && (
                   <DescriptionListGroup><DescriptionListTerm>File</DescriptionListTerm><DescriptionListDescription>{file.name}, {formatBytes(file.size)}</DescriptionListDescription></DescriptionListGroup>
