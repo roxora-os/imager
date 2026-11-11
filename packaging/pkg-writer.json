@@ -1,0 +1,12 @@
+{
+  "assets": [
+    "../node_modules/drivelist/**",
+    "../node_modules/mountutils/**",
+    "../node_modules/lzma-native/**",
+    "../node_modules/xxhash-addon/**",
+    "../node_modules/@ronomon/direct-io/**",
+    "../node_modules/usb/**",
+    "../node_modules/node-raspberrypi-usbboot/**",
+    "../node_modules/@balena/node-beaglebone-usbboot/**"
+  ]
+}

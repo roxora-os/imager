@@ -46,7 +46,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run rebuild-native
+      - name: Writer (Node.js packed with pkg, as Etcher's etcher-util)
+        run: npm run writer
       - uses: actions/download-artifact@v4
         with:
           name: rkdeveloptool-wasm
@@ -149,7 +150,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run rebuild-native
+      - name: Writer (Node.js packed with pkg, as Etcher's etcher-util)
+        run: npm run writer
       - uses: actions/download-artifact@v4
         with:
           name: rkdeveloptool-wasm
@@ -224,7 +226,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - run: npm run rebuild-native
+      - name: Writer (Node.js packed with pkg, as Etcher's etcher-util)
+        run: npm run writer
       - uses: actions/download-artifact@v4
         with:
           name: rkdeveloptool-wasm

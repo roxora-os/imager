@@ -44,7 +44,7 @@ Needs Node.js 22.
 
 ```sh
 npm ci
-npm run rebuild-native      # mountutils for Electron's ABI
+npm run writer              # the SD/USB writer, Node.js packed with pkg
 sh scripts/build-wasm.sh    # needs emsdk 3.1.48; or take the CI artifact
 npm run build
 npm start                   # or: npx electron . --dev-sample

@@ -27,6 +27,11 @@ const appDir = app.getAppPath();
 const resourcesDir = join(appDir, 'resources');
 const cacheDir = () => join(app.getPath('userData'), 'images');
 
+const WRITER = process.platform === 'win32' ? 'roxora-imager-writer.exe' : 'roxora-imager-writer';
+function writerPath(): string {
+  return app.isPackaged ? join(process.resourcesPath, 'writer', WRITER) : join(appDir, 'build-res', 'writer', WRITER);
+}
+
 let win: BrowserWindow | null = null;
 let job: AbortController | null = null;
 const pendingUsb = new Map<number, (id: string) => void>();
@@ -104,13 +109,9 @@ ipcMain.handle('sd:write', async (e, imageId: string, device: string): Promise<J
   const wc = e.sender;
   try {
     const file = await fetchImage(img, cacheDir(), (p) => sendProgress(wc, p), job.signal);
-    const helperPath = join(appDir, 'build', 'helper', 'write-helper.js');
     const out = await runHelper({
       signal: job.signal,
-      launch: (dir) => helperLaunch({
-        execPath: process.execPath, helperPath, dir,
-        appImage: process.env.APPIMAGE, resourcesRelative: 'resources/app.asar/build/helper/write-helper.js',
-      }),
+      launch: (dir) => helperLaunch({ writerPath: writerPath(), dir, appImage: process.env.APPIMAGE }),
       args: (socket, token) => [
         '--socket', socket, '--token', token, '--image', file, '--device', device,
         '--extract-size', String(img.extractSize), '--extract-sha256', img.extractSha256,

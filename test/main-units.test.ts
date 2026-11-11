@@ -49,8 +49,8 @@ describe('Range requests', () => {
 describe('starting the writer', () => {
   it('quotes arguments for sh', () => {
     expect(quote("/tmp/it's here", 'linux')).toBe("'/tmp/it'\\''s here'");
-    expect(commandLine({ exec: '/opt/Roxora Imager/roxora-imager', bootstrap: '/tmp/b.js', env: {} }, ['--device', '/dev/sdb'], 'linux'))
-      .toBe("'/opt/Roxora Imager/roxora-imager' '/tmp/b.js' '--device' '/dev/sdb'");
+    expect(commandLine({ exec: '/opt/Roxora Imager/writer', env: {} }, ['--device', '/dev/sdb'], 'linux'))
+      .toBe("'/opt/Roxora Imager/writer' '--device' '/dev/sdb'");
   });
   it('quotes for cmd and refuses what cmd cannot take', () => {
     expect(quote('\\\\.\\PhysicalDrive1', 'win32')).toBe('"\\\\.\\PhysicalDrive1"');
@@ -61,11 +61,11 @@ describe('starting the writer', () => {
   function fakeElevate(script: string) {
     return (cmd: string) => new Promise<void>((resolve, reject) => {
       const args = cmd.match(/'[^']*'/g)!.map((a) => a.slice(1, -1));
-      const p = spawn(process.execPath, ['-e', script, '--', ...args.slice(2)], { stdio: 'inherit' });
+      const p = spawn(process.execPath, ['-e', script, '--', ...args.slice(1)], { stdio: 'inherit' });
       p.on('exit', (c) => (c === 0 ? resolve() : reject(new Error(`exit ${c}`))));
     });
   }
-  const launch = () => ({ exec: '/x/app', bootstrap: '/x/b.js', env: {} });
+  const launch = () => ({ exec: '/x/writer', env: {} });
 
   it('passes progress and the outcome over the socket', async () => {
     const script = `

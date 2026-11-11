@@ -2,9 +2,9 @@
 //
 //   node test/e2e/sd-loop.mjs
 //
-// Runs the real write helper (build/helper/write-helper.js) the way the app
-// starts it (main/elevate.ts: Electron in Node mode, a bootstrap file, a
-// socket with a token), with sudo instead of pkexec. Checks:
+// Runs the real writer (build-res/writer/, from scripts/build-writer.mjs) the
+// way the app starts it (main/elevate.ts: a socket with a token), with sudo
+// instead of pkexec. Checks:
 //   1. an .img.xz is written to a loop device and the read-back matches;
 //   2. the bytes on the device equal the image;
 //   3. a wrong extract_sha256 is reported as a read-back mismatch;
@@ -22,8 +22,7 @@ const work = mkdtempSync(join(tmpdir(), 'sd-e2e-'));
 await build({ entryPoints: ['src/main/elevate.ts'], bundle: true, platform: 'node', format: 'esm', outfile: join(work, 'elevate.mjs'), logLevel: 'warning' });
 const { helperLaunch, runHelper } = await import(join(work, 'elevate.mjs'));
 
-const electronBin = join(root, 'node_modules/electron/dist/electron');
-const helperPath = join(root, 'build/helper/write-helper.js');
+const writerPath = join(root, 'build-res/writer/roxora-imager-writer');
 const BIG = { maxBuffer: 256 * 1024 * 1024 };
 const sh = (cmd, args) => execFileSync(cmd, args, BIG).toString().trim();
 let failures = 0;
@@ -53,7 +52,7 @@ function elevateWith(extraEnv) {
 async function write(device, sha, extraEnv = { ROXORA_IMAGER_TEST: '1' }, allowLoop = true) {
   const progress = [];
   const out = await runHelper({
-    launch: (dir) => helperLaunch({ execPath: electronBin, helperPath, dir, resourcesRelative: '' }),
+    launch: (dir) => helperLaunch({ writerPath, dir }),
     args: (socket, token) => ['--socket', socket, '--token', token, '--image', xz, '--device', device,
       '--extract-size', String(data.length), '--extract-sha256', sha, ...(allowLoop ? ['--allow-loop'] : [])],
     onMessage: (m) => { if (m.type === 'progress') progress.push(`${m.stage} ${m.percent}`); },

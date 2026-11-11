@@ -1,48 +1,36 @@
 // Start the write helper with administrator rights and follow its progress.
 //
-// The helper is this app's own executable in Node mode
-// (ELECTRON_RUN_AS_NODE), started through @balena/sudo-prompt the way Etcher
+// The helper is a standalone executable (Node.js packed with pkg, like
+// Etcher's etcher-util), started through @balena/sudo-prompt the way Etcher
 // does it: pkexec on Linux, the password dialog on macOS, UAC on Windows. It
 // reports over a local socket, because the elevated process's stdout only
 // arrives when it exits.
 
 import { randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import type { HelperMessage } from '../helper/write-helper';
 
 export interface HelperLaunch {
-  /** Executable to run. */
+  /** Executable to run: the writer (scripts/build-writer.mjs). */
   exec: string;
-  /** Bootstrap script passed as the first argument. */
-  bootstrap: string;
   env: Record<string, string>;
 }
 
 /**
- * How to start the helper. Inside an AppImage the executable lives on a FUSE
- * mount root cannot read, so the AppImage is run again with
- * APPIMAGE_EXTRACT_AND_RUN and the bootstrap finds the helper next to the
- * extracted executable. Everywhere else the helper's path is known.
+ * How to start the writer. Inside an AppImage it lives on a FUSE mount that
+ * root cannot read, so it is copied into the job's private temporary folder
+ * first.
  */
-export function helperLaunch(o: {
-  execPath: string; helperPath: string; appImage?: string; dir: string; resourcesRelative: string;
-}): HelperLaunch {
-  const env: Record<string, string> = { ELECTRON_RUN_AS_NODE: '1', ROXORA_IMAGER_HELPER: '1' };
-  let code: string;
-  let exec = o.execPath;
-  if (o.appImage) {
-    exec = o.appImage;
-    env.APPIMAGE_EXTRACT_AND_RUN = '1';
-    code = `const p = require('path');\nrequire(p.join(p.dirname(process.execPath), ${JSON.stringify(o.resourcesRelative)}));\n`;
-  } else {
-    code = `require(${JSON.stringify(o.helperPath)});\n`;
-  }
-  const bootstrap = join(o.dir, 'bootstrap.js');
-  writeFileSync(bootstrap, code, { mode: 0o644 });
-  return { exec, bootstrap, env };
+export function helperLaunch(o: { writerPath: string; appImage?: string; dir: string }): HelperLaunch {
+  const env: Record<string, string> = { ROXORA_IMAGER_HELPER: '1' };
+  if (!o.appImage) return { exec: o.writerPath, env };
+  const exec = join(o.dir, basename(o.writerPath));
+  copyFileSync(o.writerPath, exec);
+  chmodSync(exec, 0o755);
+  return { exec, env };
 }
 
 /** Quote one argument for the shell sudo-prompt runs (sh, or cmd on Windows). */
@@ -55,7 +43,7 @@ export function quote(arg: string, platform = process.platform): string {
 }
 
 export function commandLine(l: HelperLaunch, args: string[], platform = process.platform): string {
-  return [l.exec, l.bootstrap, ...args].map((a) => quote(a, platform)).join(' ');
+  return [l.exec, ...args].map((a) => quote(a, platform)).join(' ');
 }
 
 export interface RunHelperOptions {

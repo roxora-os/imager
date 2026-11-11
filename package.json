@@ -13,10 +13,10 @@
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "rebuild-native": "electron-rebuild -f -o mountutils",
     "icons": "node scripts/icons.mjs",
     "e2e:maskrom": "node scripts/electron-maskrom-e2e.mjs",
-    "shots": "node scripts/shots.mjs dev/shots"
+    "shots": "node scripts/shots.mjs dev/shots",
+    "writer": "node scripts/build-writer.mjs"
   },
   "dependencies": {
     "@balena/sudo-prompt": "9.2.1-workaround-windows-amperstand-in-username-0849e215b947987a643fe5763902aea201255534",
@@ -24,7 +24,6 @@
     "etcher-sdk": "10.2.20"
   },
   "devDependencies": {
-    "@electron/rebuild": "4.0.1",
     "@noble/hashes": "2.4.0",
     "@patternfly/patternfly": "6.7.0",
     "@patternfly/react-core": "6.7.0",
@@ -34,6 +33,7 @@
     "@types/node": "22.19.1",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
+    "@yao-pkg/pkg": "6.24.0",
     "electron": "45.2.3",
     "electron-builder": "26.0.12",
     "esbuild": "0.25.12",
@@ -91,6 +91,12 @@
       "allowToChangeInstallationDirectory": true,
       "artifactName": "roxora-imager-${version}-windows-${arch}-setup.${ext}"
     },
-    "publish": null
+    "publish": null,
+    "extraResources": [
+      {
+        "from": "build-res/writer",
+        "to": "writer"
+      }
+    ]
   }
 }
