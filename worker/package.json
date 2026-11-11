@@ -1,0 +1,13 @@
+{
+  "name": "roxora-download-proxy",
+  "private": true,
+  "license": "GPL-2.0-only",
+  "description": "Cloudflare Worker that serves roxora-os/build release files with CORS headers for the web imager.",
+  "scripts": {
+    "dev": "wrangler dev --local",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.153.0"
+  }
+}

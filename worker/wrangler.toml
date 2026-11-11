@@ -1,0 +1,10 @@
+# Roxora download proxy. Deploy steps: README.md in this directory.
+# No account id here: wrangler takes it from `npx wrangler login`.
+name = "roxora-download"
+main = "src/index.ts"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# To serve it from a route on a domain in the same Cloudflare account
+# instead, add for example:
+# routes = [{ pattern = "download.example.com/*", zone_name = "example.com" }]
