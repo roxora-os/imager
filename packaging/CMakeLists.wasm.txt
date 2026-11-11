@@ -1,0 +1,70 @@
+cmake_minimum_required(VERSION 3.16)
+project(rkdeveloptool_wasm LANGUAGES C CXX)
+
+# --- Inputs (pass via -D) ---
+set(RKTOOL_ROOT        ""  CACHE PATH     "Path to rktool-webusb repo (contains rkdeveloptool/ subdir)")
+set(LIBUSB_STATIC_LIB  ""  CACHE FILEPATH "Path to Emscripten-compiled libusb-1.0.a")
+set(LIBUSB_INCLUDE_DIR ""  CACHE PATH     "Path to libusb/libusb/ include directory")
+set(DIST_DIR           "${CMAKE_BINARY_DIR}" CACHE PATH "Output directory for rkdeveloptool.js/.wasm")
+
+set(RKDEVELOPTOOL_DIR "${RKTOOL_ROOT}/rkdeveloptool")
+
+if(NOT EXISTS "${RKDEVELOPTOOL_DIR}/main.cpp")
+  message(FATAL_ERROR "rkdeveloptool source not found at: ${RKDEVELOPTOOL_DIR}")
+endif()
+if(NOT EXISTS "${LIBUSB_STATIC_LIB}")
+  message(FATAL_ERROR "libusb static lib not found: ${LIBUSB_STATIC_LIB}")
+endif()
+
+# --- Source ---
+file(GLOB RKTOOL_SOURCES "${RKDEVELOPTOOL_DIR}/*.cpp")
+list(SORT RKTOOL_SOURCES)
+
+set(CMAKE_C_STANDARD   11)
+set(CMAKE_CXX_STANDARD 11)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+configure_file(
+  "${RKDEVELOPTOOL_DIR}/config.h.in"
+  "${CMAKE_BINARY_DIR}/config.h"
+)
+
+add_executable(rkdeveloptool ${RKTOOL_SOURCES})
+
+target_include_directories(rkdeveloptool PRIVATE
+  "${CMAKE_BINARY_DIR}"
+  "${RKDEVELOPTOOL_DIR}"
+  "${LIBUSB_INCLUDE_DIR}"
+)
+
+target_link_libraries(rkdeveloptool PRIVATE "${LIBUSB_STATIC_LIB}")
+
+target_link_options(rkdeveloptool PRIVATE
+  # Match jjm2473/rktool-webusb CMakeLists.wasm.txt exactly (no ASSERTIONS=0).
+  # C++20 coroutines in emscripten_webusb.cpp require the emval handles and
+  # coroutine resume machinery to work correctly.  Adding ASSERTIONS=0 disables
+  # the pthread_equal guard but does not fix the underlying emval use-after-free
+  # that surfaces next — so we leave it at the default (ASSERTIONS=1 in Debug,
+  # 0 in Release via CMAKE_BUILD_TYPE=Release which Emscripten maps to -O3).
+  "-sUSE_PTHREADS=0"
+  "-sALLOW_MEMORY_GROWTH=1"
+  "-sFORCE_FILESYSTEM=1"
+  "-D_FILE_OFFSET_BITS=64"
+  "-sASYNCIFY"
+  "--bind"
+  "-lworkerfs.js"
+  "-lnodefs.js"
+  "-sMODULARIZE=1"
+  "-sEXPORT_ES6=1"
+  "-sEXPORT_NAME=createRKDevelopToolModule"
+  "-sINVOKE_RUN=0"
+  "-sEXPORTED_RUNTIME_METHODS=['FS','callMain','Asyncify','WORKERFS','NODEFS']"
+  "-sEXPORTED_FUNCTIONS=['_main']"
+  "--minify" "0"
+)
+
+set_target_properties(rkdeveloptool PROPERTIES
+  OUTPUT_NAME "rkdeveloptool"
+  SUFFIX ".js"
+  RUNTIME_OUTPUT_DIRECTORY "${DIST_DIR}"
+)

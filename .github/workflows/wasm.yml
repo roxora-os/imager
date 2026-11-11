@@ -1,0 +1,21 @@
+name: rkdeveloptool WASM
+
+# Builds rkdeveloptool for WebAssembly the way edk2-webflash does
+# (scripts/build-wasm.sh) and uploads it as the "rkdeveloptool-wasm" artifact.
+on:
+  workflow_call:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Emscripten 3.1.48
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 3.1.48
+      - run: sh scripts/build-wasm.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rkdeveloptool-wasm
+          path: vendor/rkdeveloptool-wasm/
