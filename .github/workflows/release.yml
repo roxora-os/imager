@@ -82,6 +82,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           export VERSION
+          rm -rf dist/app && cp -a "$APP_DIR" dist/app
           nfpm package -f packaging/nfpm.yaml -p deb -t dist/
           nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
           ls -l dist/

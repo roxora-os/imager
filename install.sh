@@ -126,7 +126,7 @@ Type=Application
 Name=Roxora Imager
 Comment=Write Roxora images to SD cards, USB drives and board storage
 Exec=$dest/roxora-imager.AppImage
-Categories=System;Utility;
+Categories=Utility;
 Terminal=false
 DESKTOP
   say "Installed $dest/roxora-imager.AppImage (also in your applications menu)."

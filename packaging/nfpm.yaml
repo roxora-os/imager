@@ -1,7 +1,7 @@
 # nfpm config for the .deb and .rpm, as in RKDevelopTool-GUI.
 #   VERSION=0.1.0 PKG_ARCH=amd64 nfpm package -f packaging/nfpm.yaml -p deb -t dist/
-# PKG_ARCH is amd64 or arm64; APP_DIR is electron-builder's unpacked app
-# (dist/linux-unpacked or dist/linux-arm64-unpacked).
+# PKG_ARCH is amd64 or arm64. dist/app is electron-builder's unpacked app
+# (dist/linux-unpacked or dist/linux-arm64-unpacked), copied there.
 name: roxora-imager
 arch: ${PKG_ARCH}
 platform: linux
@@ -43,7 +43,7 @@ overrides:
       - polkit
 
 contents:
-  - src: ${APP_DIR}/
+  - src: ./dist/app/
     dst: /opt/roxora-imager/
     type: tree
   - src: ./packaging/launcher.sh
