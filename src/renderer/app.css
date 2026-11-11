@@ -1,0 +1,37 @@
+/* Page CSS on top of PatternFly: the Cockpit look (grey page, plain cards). */
+html, body, #root { height: 100%; }
+
+.brand { display: flex; align-items: center; gap: var(--pf-t--global--spacer--sm); text-decoration: none; }
+.pf-v6-c-masthead__logo { --pf-v6-c-masthead__logo--Width: auto; }
+.brand-mark { height: 1.75rem; width: auto; }
+.brand-name { font-size: var(--pf-t--global--font--size--lg); color: var(--pf-t--global--text--color--regular); }
+.masthead-actions { justify-content: flex-end; }
+
+.step-title { margin-bottom: var(--pf-t--global--spacer--xs); font-weight: var(--pf-t--global--font--weight--body--default); }
+.step-lead { margin-bottom: var(--pf-t--global--spacer--md); color: var(--pf-t--global--text--color--subtle); }
+.step-note { margin-top: var(--pf-t--global--spacer--md); color: var(--pf-t--global--text--color--subtle); }
+.muted { color: var(--pf-t--global--text--color--subtle); font-size: var(--pf-t--global--font--size--sm); }
+
+.method { display: grid; gap: var(--pf-t--global--spacer--md); margin: var(--pf-t--global--spacer--md) 0 var(--pf-t--global--spacer--lg); }
+.dest-card { margin-bottom: var(--pf-t--global--spacer--md); border: var(--pf-t--global--border--width--regular) solid var(--pf-t--global--border--color--default); border-radius: var(--pf-t--global--border--radius--medium); }
+.dest-card .pf-v6-c-radio + .pf-v6-c-radio { margin-top: var(--pf-t--global--spacer--sm); }
+.file-row { display: flex; align-items: center; gap: var(--pf-t--global--spacer--md); margin: var(--pf-t--global--spacer--sm) 0 0 var(--pf-t--global--spacer--lg); }
+.hidden-drives { margin-top: var(--pf-t--global--spacer--md); }
+.hidden-drives ul { margin: 0; padding-left: var(--pf-t--global--spacer--lg); }
+.dest-card .pf-v6-c-code-block { margin-top: var(--pf-t--global--spacer--sm); }
+
+.review { max-width: 52rem; }
+.footer-note { align-self: center; color: var(--pf-t--global--text--color--subtle); }
+
+.notice { padding-bottom: 0; }
+.run .pf-v6-c-card { max-width: 52rem; }
+.stage + .stage { margin-top: var(--pf-t--global--spacer--md); }
+.result { margin-top: var(--pf-t--global--spacer--lg); }
+.result .detail { font-family: var(--pf-t--global--font--family--mono); font-size: var(--pf-t--global--font--size--sm); word-break: break-all; }
+.log { margin-top: var(--pf-t--global--spacer--lg); }
+.log .pf-v6-c-code-block__code { max-height: 18rem; overflow: auto; display: block; }
+.run-actions { padding: 0 var(--pf-t--global--spacer--lg) var(--pf-t--global--spacer--lg); }
+
+.settings { display: grid; gap: var(--pf-t--global--spacer--lg); }
+.settings-label { margin-bottom: var(--pf-t--global--spacer--sm); }
+.usb-choice { display: block; margin-top: var(--pf-t--global--spacer--sm); }
