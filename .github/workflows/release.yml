@@ -62,7 +62,8 @@ jobs:
         run: |
           V=$(node -p "require('./package.json').version")
           f=$(ls dist/*.AppImage)
-          mv "$f" "dist/roxora-imager-$V-linux-${{ matrix.arch }}.AppImage"
+          want="dist/roxora-imager-$V-linux-${{ matrix.arch }}.AppImage"
+          [ "$f" = "$want" ] || mv "$f" "$want"
       - name: Install nfpm
         run: |
           curl -fsSL -o /tmp/nfpm.tar.gz \
@@ -196,7 +197,7 @@ jobs:
           set +e
           # macOS has no timeout(1); SIGALRM after 30 s gives 142.
           exe=$(ls "dist/${{ matrix.out }}/Roxora Imager.app/Contents/MacOS/"* | head -1)
-          perl -e 'alarm 30; exec @ARGV' "$exe" > /tmp/app.log 2>&1
+          ELECTRON_ENABLE_LOGGING=1 perl -e 'alarm 30; exec @ARGV' "$exe" --enable-logging > /tmp/app.log 2>&1
           rc=$?
           cat /tmp/app.log
           [ "$rc" = 142 ] || { echo "FAIL: exited with $rc"; exit 1; }
