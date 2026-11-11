@@ -5,6 +5,9 @@ name: Web app
 on:
   push:
     branches: [main]
+  # A first release changes where the page's "desktop app" links go.
+  release:
+    types: [published]
   workflow_dispatch:
 
 permissions:
@@ -35,6 +38,8 @@ jobs:
           name: rkdeveloptool-wasm
           path: vendor/rkdeveloptool-wasm
       - run: node scripts/build-web.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web-dist

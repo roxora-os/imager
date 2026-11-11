@@ -27,7 +27,12 @@ declare global {
 const api = window.imager;
 // The web build writes over Maskrom only: a browser cannot open a disk.
 const WEB = api.platform === 'web';
-const DESKTOP_URL = 'https://github.com/roxora-os/imager/releases';
+// The web build is told at build time whether the desktop app has a release
+// yet (scripts/build-web.mjs); until then "desktop app" points at the install
+// notes, not at an empty releases page.
+declare const __APP_HAS_RELEASE__: boolean;
+const DESKTOP_URL = typeof __APP_HAS_RELEASE__ !== 'undefined' && !__APP_HAS_RELEASE__
+  ? 'https://github.com/roxora-os/imager#install' : 'https://github.com/roxora-os/imager/releases';
 const RPI_IMAGER_URL = 'https://www.raspberrypi.com/software/';
 
 type Method = 'sd' | 'maskrom';
@@ -405,7 +410,7 @@ function ReviewFooter({ canWrite, why, onWrite }: { canWrite: boolean; why: stri
 
 function RunView({ run, onCancel, onDone, reconnect }: { run: Run; onCancel: () => void; onDone: () => void; reconnect: boolean }) {
   return (
-    <PageSection className="run">
+    <PageSection isWidthLimited={WEB} isCenterAligned={WEB} className="run">
       <Card>
         <CardTitle><Title headingLevel="h2">{run.result ? (run.result.ok ? 'Done' : 'Stopped') : 'Writing'}</Title></CardTitle>
         <CardBody>
@@ -694,13 +699,13 @@ export function App() {
   return (
     <Shell onSettings={() => setSettings(true)}>
       {update && (
-        <PageSection className="notice">
+        <PageSection isWidthLimited={WEB} isCenterAligned={WEB} className="notice">
           <Alert isInline variant="info" title={`Roxora Imager ${update.version} is available`}
             actionLinks={<Button variant="link" isInline component="a" href={update.url} target="_blank">Release page</Button>} />
         </PageSection>
       )}
       {WEB && !('usb' in navigator) && (
-        <PageSection className="notice">
+        <PageSection isWidthLimited={WEB} isCenterAligned={WEB} className="notice">
           <Alert isInline variant="warning" title="This browser cannot reach USB devices">
             Writing over USB needs WebUSB, which Chrome, Edge and other Chromium browsers have. Or use
             the <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">desktop app</Button>.
@@ -708,7 +713,7 @@ export function App() {
         </PageSection>
       )}
       {sample && (
-        <PageSection className="notice">
+        <PageSection isWidthLimited={WEB} isCenterAligned={WEB} className="notice">
           <Alert isInline variant="warning" title="Sample data">
             These entries come from the sample catalog in the release contract. The releases do not exist and nothing
             can be written.{' '}
@@ -717,7 +722,7 @@ export function App() {
         </PageSection>
       )}
       {run ? <RunView run={run} onCancel={cancel} onDone={finishRun} reconnect={reconnect} /> : (
-        <PageSection isFilled type="wizard" aria-label="Write an image">
+        <PageSection isWidthLimited={WEB} isCenterAligned={WEB} isFilled type="wizard" aria-label="Write an image">
           <Wizard navAriaLabel="Steps" isVisitRequired onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
             <WizardStep name="Board" id="board" footer={{ isNextDisabled: !board, isCancelHidden: true }}>
               <BoardStep catalog={catalog} boards={boards} board={board} setBoard={chooseBoard} reload={load}

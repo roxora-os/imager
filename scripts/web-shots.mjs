@@ -1,7 +1,7 @@
 // Screenshots of the web build (web-dist/), served under /imager/ as on
 // GitHub Pages, in an Electron window used as a plain browser (no app
 // code): the board step, the destination step and the review, light and
-// dark, 1920 and 390 px wide. Also reports whether the page became
+// dark, 1920, 2560 and 390 px wide. Also reports whether the page became
 // cross-origin isolated through coi-serviceworker.js.
 //   node scripts/web-shots.mjs OUT_DIR
 import { _electron as electron } from 'playwright-core';
@@ -33,7 +33,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 const errors = [];
 const facts = {};
 
-for (const [w, h, tag] of [[1920, 1080, 'w'], [390, 844, 'p']]) {
+for (const [w, h, tag] of [[1920, 1080, 'w'], [2560, 1440, 'x'], [390, 844, 'p']]) {
   for (const theme of ['light', 'dark']) {
     const app = await electron.launch({ args: [join(dir, 'main.cjs')], env });
     await app.evaluate(async ({ app: a, BrowserWindow }, [w, h]) => {
@@ -45,6 +45,10 @@ for (const [w, h, tag] of [[1920, 1080, 'w'], [390, 844, 'p']]) {
     const page = await app.firstWindow();
     page.on('pageerror', (e) => errors.push(`${tag}-${theme}: ${e.message}`));
     await page.goto(`${base}?sample=1`);
+    // The first visit registers coi-serviceworker.js and reloads once.
+    for (let i = 0; i < 10; i++) {
+      try { await page.waitForFunction(() => self.crossOriginIsolated, null, { timeout: 3000 }); break; } catch { /* reloading */ }
+    }
     await page.evaluate((t) => { localStorage.setItem('theme', t); }, theme);
     await page.reload();
     await page.waitForSelector('h2:has-text("Board")', { timeout: 30000 });

@@ -8,6 +8,16 @@ import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 const out = 'web-dist';
 const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
 rmSync(out, { recursive: true, force: true });
+
+// Has the desktop app been released? Decides where "desktop app" links go.
+// pages.yml rebuilds when a release is published.
+let hasRelease = false;
+try {
+  const r = await fetch('https://api.github.com/repos/roxora-os/imager/releases?per_page=1',
+    { headers: { Accept: 'application/vnd.github+json', ...(process.env.GITHUB_TOKEN ? { Authorization: `Bearer ${process.env.GITHUB_TOKEN}` } : {}) } });
+  if (r.ok) hasRelease = (await r.json()).some((x) => !x.draft);
+} catch { /* offline: link to the install notes */ }
+console.log(`desktop app released: ${hasRelease}`);
 mkdirSync(`${out}/resources/xzwasm`, { recursive: true });
 
 const web = { bundle: true, platform: 'browser', target: 'chrome120', format: 'esm', minify: true, logLevel: 'warning' };
@@ -15,7 +25,7 @@ await build({
   ...web, entryPoints: { app: 'src/web/main.tsx' }, outdir: out,
   loader: { '.woff2': 'file', '.woff': 'file', '.ttf': 'file', '.svg': 'file', '.png': 'file', '.jpg': 'file' },
   assetNames: 'assets/[name]-[hash]', jsx: 'automatic',
-  define: { 'process.env.NODE_ENV': '"production"', __APP_VERSION__: JSON.stringify(version) },
+  define: { 'process.env.NODE_ENV': '"production"', __APP_VERSION__: JSON.stringify(version), __APP_HAS_RELEASE__: JSON.stringify(hasRelease) },
 });
 await build({ ...web, entryPoints: { 'maskrom-worker': 'src/maskrom/worker.ts' }, outdir: out });
 cpSync('src/web/index.html', `${out}/index.html`);

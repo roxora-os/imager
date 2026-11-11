@@ -18,8 +18,19 @@ against the catalog before it is written.
 Status: first version, not yet tested on hardware. There are no Roxora
 releases yet; until there are, the app says so and has nothing to write.
 
+## Install
+
 Windows (x64), macOS (Apple silicon and Intel) and Linux (AppImage, .deb,
-.rpm; x86_64 and arm64). See [docs/install.md](docs/install.md).
+.rpm; x86_64 and arm64) packages are attached to the
+[releases](https://github.com/roxora-os/imager/releases) once there is one;
+until then build it from source as below. On macOS and Linux:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/roxora-os/imager/main/install.sh | sh
+```
+
+What each system asks on first start, and the drivers for Maskrom writing:
+[docs/install.md](docs/install.md).
 
 ## How it works
 

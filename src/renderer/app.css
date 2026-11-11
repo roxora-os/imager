@@ -53,3 +53,8 @@ html, body, #root { height: 100%; }
 @media (min-width: 48rem) {
   .board-pane .pf-v6-c-table .pf-v6-c-table__td.nowrap-md, .board-pane .pf-v6-c-table td.nowrap-md { white-space: nowrap; }
 }
+
+/* Web build: a centred column like the Roxora website (76rem), not the full
+   width of a large screen. The desktop window keeps its own size. */
+html.web .pf-v6-c-page { --pf-v6-c-page--section--m-limit-width--MaxWidth: 76rem; }
+html.web .pf-v6-c-page__main-section.pf-m-limit-width > .pf-v6-c-page__main-body { width: 100%; }
