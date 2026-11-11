@@ -24,7 +24,8 @@ const { helperLaunch, runHelper } = await import(join(work, 'elevate.mjs'));
 
 const electronBin = join(root, 'node_modules/electron/dist/electron');
 const helperPath = join(root, 'build/helper/write-helper.js');
-const sh = (cmd, args) => execFileSync(cmd, args).toString().trim();
+const BIG = { maxBuffer: 256 * 1024 * 1024 };
+const sh = (cmd, args) => execFileSync(cmd, args, BIG).toString().trim();
 let failures = 0;
 const check = (ok, what) => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${what}`); if (!ok) failures++; };
 
@@ -66,20 +67,20 @@ try {
   console.log(JSON.stringify(a.out));
   check(a.out.ok === true && a.out.sha256 === imgSha, 'write and read-back match the release checksum');
   check(a.progress.some((p) => p.startsWith('write')) && a.progress.some((p) => p.startsWith('verify')), 'progress reported for write and verify');
-  const onDisk = execFileSync('sudo', ['head', '-c', String(data.length), loop]);
+  const onDisk = execFileSync('sudo', ['head', '-c', String(data.length), loop], BIG);
   check(Buffer.compare(onDisk, data) === 0, 'device holds exactly the image');
 
   const b = await write(loop, '0'.repeat(64));
   console.log(JSON.stringify(b.out));
   check(b.out.ok === false && /does not read back/.test(b.out.reason), 'wrong checksum reported as a read-back mismatch');
 
-  const rootSource = sh('findmnt', ['-n', '-o', 'SOURCE', '/']);
+  const rootSource = execFileSync('readlink', ['-f', sh('findmnt', ['-n', '-o', 'SOURCE', '/'])]).toString().trim();
   const pk = sh('lsblk', ['-n', '-d', '-o', 'PKNAME', rootSource]).split('\n')[0];
   const rootDisk = pk ? `/dev/${pk}` : rootSource;
-  const before = createHash('sha256').update(execFileSync('sudo', ['head', '-c', '1048576', rootDisk])).digest('hex');
+  const before = createHash('sha256').update(execFileSync('sudo', ['head', '-c', '1048576', rootDisk], BIG)).digest('hex');
   const c = await write(rootDisk, imgSha);
   console.log(rootDisk, JSON.stringify(c.out));
-  const after = createHash('sha256').update(execFileSync('sudo', ['head', '-c', '1048576', rootDisk])).digest('hex');
+  const after = createHash('sha256').update(execFileSync('sudo', ['head', '-c', '1048576', rootDisk], BIG)).digest('hex');
   check(c.out.ok === false && /not a drive the imager writes to|no longer connected/.test(c.out.reason) && before === after,
     `the system disk ${rootDisk} is refused and unchanged`);
 
