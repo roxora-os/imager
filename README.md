@@ -12,8 +12,26 @@ images in two ways:
 The same page also runs in the browser, Maskrom only, at
 https://roxora-os.github.io/imager/ (Chrome, Edge or another browser with
 WebUSB). A browser cannot open a disk, so it cannot write an SD card in the
-computer; there the release file is downloaded by hand, picked, and checked
-against the catalog before it is written.
+computer.
+
+GitHub serves release downloads without CORS headers, so a web page cannot
+download them itself. The web version therefore gets release files in one of
+two ways:
+
+- **Through the download proxy**, when the build has one: a small Cloudflare
+  Worker ([worker/](worker/)) that serves only the release files with CORS
+  headers. The page downloads the file showing progress, checks its size
+  and SHA-256 against the catalog (whose checksums were compared with the
+  digests the GitHub API publishes) while it streams, then writes it and
+  reads it back against `extract_sha256`.
+- **By hand**, when there is no proxy or it fails: the page says why, the
+  release file is downloaded in the browser, picked, and checked the same way
+  before it is written.
+
+The proxy address is set at build time with `ROXORA_DOWNLOAD_PROXY` (the
+Pages workflow takes it from the repository variable of the same name). It is
+empty until the Worker is deployed. The desktop app downloads directly and
+does not use it.
 
 Status: first version, not yet tested on hardware. There are no Roxora
 releases yet; until there are, the app says so and has nothing to write.
@@ -40,6 +58,7 @@ What each system asks on first start, and the drivers for Maskrom writing:
 | SD/USB writing | [etcher-sdk](https://github.com/balena-io-modules/etcher-sdk), in a helper process started with administrator rights the way Etcher starts its writer. |
 | Maskrom writing | rkdeveloptool compiled to WebAssembly with libusb's WebUSB backend, as in [edk2-webflash](https://github.com/gahingwoo/edk2-webflash), running in a worker inside the app. |
 | Interface | Electron, React and [PatternFly](https://www.patternfly.org/). |
+| Download proxy | A Cloudflare Worker in [worker/](worker/), for the web version only. |
 | Web version | The same React code with a browser adapter (`src/web/`). The xz decoder, image format checks and the cross-origin isolation service worker come from roxora-os/edk2-webflash (`src/web/webflash/`, `resources/xzwasm/`). |
 
 Safety rules:
@@ -67,6 +86,7 @@ sh scripts/build-wasm.sh    # needs emsdk 3.1.48; or take the CI artifact
 npm run build
 npm start                   # or: npx electron . --dev-sample
 node scripts/build-web.mjs  # the web version, into web-dist/ (?sample=1 shows the sample catalog)
+ROXORA_DOWNLOAD_PROXY=https://... node scripts/build-web.mjs   # the same, downloading through the proxy
 ```
 
 `--dev-sample` shows the sample catalog from the release contract. Those
@@ -75,7 +95,7 @@ entries are marked as samples and cannot be written.
 ## Tests
 
 ```sh
-npm test                                   # catalog, targets, Maskrom through the WASM
+npm test                                   # catalog, targets, Maskrom through the WASM, download proxy
 node scripts/electron-maskrom-e2e.mjs      # Maskrom path inside Electron
 node test/e2e/sd-loop.mjs                  # SD write to a loop device (Linux, sudo)
 node --test test/webflash/*.test.js        # modules copied from edk2-webflash

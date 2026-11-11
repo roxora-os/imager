@@ -271,17 +271,34 @@ function DestinationStep(p: {
   source: MaskromSource; setSource: (s: MaskromSource) => void;
   file: PreparedFile | null; pickFile: () => void; picking: boolean; fileError: string | null;
   releaseFile: PreparedFile | null; pickRelease: () => void; checking: string | null;
+  downloadRelease: () => void; proxyError: string | null;
 }) {
   const mb = maskromBoard(p.boardId);
-  // Web: a release file is downloaded by the user, then picked and checked.
-  const releasePicker = (what: 'image' | 'spi') => WEB && p.source === (what === 'spi' ? 'spi' : 'release') && (
-    <div className="file-row">
-      <Button variant="secondary" onClick={p.pickRelease} isLoading={!!p.checking} isDisabled={!!p.checking}>Choose the downloaded file</Button>
-      <span>{p.checking ?? (p.releaseFile ? `${p.releaseFile.name}: matches the release` : (
-        <>Download <Button variant="link" isInline component="a" href={what === 'spi' ? p.image?.spi?.url : p.image?.url}>
-          {what === 'spi' ? p.image?.spi?.file : p.image?.file}</Button> first.</>))}</span>
-    </div>
-  );
+  // Web: a release file comes through the download proxy when the build has
+  // one. Without it, or when it fails, the user downloads the file and
+  // picks it; either way it is checked against the release.
+  const viaProxy = WEB && !!api.downloadProxy && !p.proxyError;
+  const releasePicker = (what: 'image' | 'spi') => {
+    if (!WEB || p.source !== (what === 'spi' ? 'spi' : 'release')) return null;
+    const f = what === 'spi' ? p.image?.spi : p.image;
+    if (viaProxy) {
+      return (
+        <div className="file-row">
+          <Button variant="secondary" onClick={p.downloadRelease} isLoading={!!p.checking} isDisabled={!!p.checking}>Download from the release</Button>
+          <span>{p.checking ?? (p.releaseFile ? `${p.releaseFile.name}: downloaded, matches the release`
+            : f ? `${f.file}, ${formatBytes(f.size)}, through ${api.downloadProxy}` : '')}</span>
+        </div>
+      );
+    }
+    const why = p.proxyError ?? 'GitHub does not let a web page download release files itself.';
+    return (
+      <div className="file-row">
+        <Button variant="secondary" onClick={p.pickRelease} isLoading={!!p.checking} isDisabled={!!p.checking}>Choose the downloaded file</Button>
+        <span>{p.checking ?? (p.releaseFile ? `${p.releaseFile.name}: matches the release` : (
+          <>{why} Download <Button variant="link" isInline component="a" href={f?.url}>{f?.file}</Button>, then choose it.</>))}</span>
+      </div>
+    );
+  };
   return (
     <>
       <Title headingLevel="h2" className="step-title">Destination</Title>
@@ -365,6 +382,7 @@ function DestinationStep(p: {
                   isDisabled={!p.image?.spi || p.storage !== 'spinor'}
                   label={p.image?.spi ? `This release's SPI bootloader (${p.image.spi.file}, ${formatBytes(p.image.spi.size)})` : "This release's SPI bootloader"}
                   description={!p.image?.spi ? 'This release has no SPI bootloader for the board.'
+                    : viaProxy ? 'Downloaded from the release and checked against its SHA-256, then read back after writing.'
                     : WEB ? 'Checked against the release SHA-256 when you choose it, then read back after writing.'
                       : 'Downloaded from the release and checked against its SHA-256, then read back after writing.'} />
               )}
@@ -513,6 +531,7 @@ export function App() {
   const [fileError, setFileError] = useState<string | null>(null);
   const [releaseFile, setReleaseFile] = useState<PreparedFile | null>(null);
   const [checking, setChecking] = useState<string | null>(null);
+  const [proxyError, setProxyError] = useState<string | null>(null);
   const [reconnect, setReconnect] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
@@ -581,8 +600,18 @@ export function App() {
     if ('error' in r) { setReleaseFile(null); setFileError(r.error); return; }
     setReleaseFile(r);
   };
+  const downloadRelease = async () => {
+    if (!image || !api.downloadReleaseFile) return;
+    setFileError(null);
+    setChecking('Downloading...');
+    const r = await api.downloadReleaseFile(image.id, source === 'spi' ? 'spi' : 'image',
+      (d, t) => setChecking(`Downloading and checking: ${formatBytes(d)} of ${formatBytes(t)}`));
+    setChecking(null);
+    if ('error' in r) { setReleaseFile(null); setProxyError(r.error); return; }
+    setReleaseFile(r);
+  };
   // A picked release file belongs to one image and one kind.
-  useEffect(() => { setReleaseFile(null); }, [imageId, source]);
+  useEffect(() => { setReleaseFile(null); setProxyError(null); }, [imageId, source]);
 
   const target = drives?.targets.find((t) => t.device === device);
   const destReady = method === 'sd' ? !!target
@@ -737,7 +766,8 @@ export function App() {
                 drives={drives} refreshDrives={refreshDrives} device={device} setDevice={setDevice}
                 storage={storage} setStorage={(s) => { setStorage(s); setSource(mb?.wholeImage.includes(s) ? 'release' : s === 'spinor' && image?.spi ? 'spi' : 'file'); }}
                 source={source} setSource={setSource} file={file} pickFile={pickFile} picking={picking} fileError={fileError}
-                releaseFile={releaseFile} pickRelease={pickRelease} checking={checking} />
+                releaseFile={releaseFile} pickRelease={pickRelease} checking={checking}
+                downloadRelease={downloadRelease} proxyError={proxyError} />
             </WizardStep>
             <WizardStep name="Review" id="review" isDisabled={!destReady}
               footer={<ReviewFooter canWrite={!why} why={why} onWrite={onWrite} />}>
@@ -755,7 +785,7 @@ export function App() {
                   <DescriptionListGroup><DescriptionListTerm>SPI bootloader</DescriptionListTerm><DescriptionListDescription>{image.spi.file}, {formatBytes(image.spi.size)}, from {releaseWords(image).toLowerCase()}</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {WEB && source !== 'file' && releaseFile && (
-                  <DescriptionListGroup><DescriptionListTerm>Chosen file</DescriptionListTerm><DescriptionListDescription>{releaseFile.name}, matches the release SHA-256</DescriptionListDescription></DescriptionListGroup>
+                  <DescriptionListGroup><DescriptionListTerm>Release file</DescriptionListTerm><DescriptionListDescription>{releaseFile.name}, matches the release SHA-256</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {method === 'maskrom' && source === 'file' && file && (
                   <DescriptionListGroup><DescriptionListTerm>File</DescriptionListTerm><DescriptionListDescription>{file.name}, {formatBytes(file.size)}</DescriptionListDescription></DescriptionListGroup>

@@ -1,10 +1,11 @@
 // window.imager for the web build. The browser can reach the catalog (the
 // site's CORS-enabled mirror, cross-checked with the GitHub releases API)
 // and WebUSB, but not release downloads (no CORS) and not disks: so there
-// is no SD/USB writing, and release files are downloaded by the user and
-// picked from disk, then checked against the catalog the way
-// edk2-webflash's Roxora panel does (src/roxora.js there: the API asset
-// digest and extract_sha256).
+// is no SD/USB writing. Release files come through the download proxy
+// (proxy.ts, worker/) when the build has one; otherwise, or when it fails,
+// they are downloaded by the user and picked from disk. Either way they
+// are checked against the catalog the way edk2-webflash's Roxora panel
+// does (src/roxora.js there: the API asset digest and extract_sha256).
 
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
@@ -12,8 +13,13 @@ import {
   checkAgainstRelease, parseCatalog, RELEASES_REPO, type CatalogImage, type GithubRelease, type ParsedCatalog,
 } from '../shared/catalog';
 import type { CatalogResult, ImagerApi, PreparedFile } from '../shared/ipc';
+import { downloadVerified, proxyBase, proxyUrl, releaseFile } from './proxy';
 
 declare const __APP_VERSION__: string;
+declare const __DOWNLOAD_PROXY__: string;
+
+/** The download proxy of this build (ROXORA_DOWNLOAD_PROXY), or null. */
+export const DOWNLOAD_PROXY = proxyBase(typeof __DOWNLOAD_PROXY__ === 'string' ? __DOWNLOAD_PROXY__ : '');
 
 export const MIRROR_INDEX = 'https://roxora-os.github.io/catalog/index.json';
 const API = `https://api.github.com/repos/${RELEASES_REPO}/releases?per_page=30`;
@@ -111,6 +117,32 @@ export function expectedHashes(img: CatalogImage, what: 'image' | 'spi'):
 
 let tokens = 0;
 
+/**
+ * Download a release file through the proxy at `base` and check it. The
+ * catalog sha256 checked here is the one already compared with the digest
+ * the GitHub API publishes for the asset (checkAgainstRelease); the bytes
+ * written are later read back against extract_sha256 (or the SPI sha256).
+ * The error is one sentence for the page, which then asks the user to
+ * download the file and choose it.
+ */
+export async function fetchReleaseFile(
+  base: string | null, img: CatalogImage | undefined, what: 'image' | 'spi',
+  onProgress: (done: number, total: number) => void, fetchFn: typeof fetch = fetch,
+): Promise<PreparedFile | { error: string }> {
+  if (!base) return { error: 'This page has no download service set up.' };
+  if (!img || img.sample) return { error: 'This image is not from a published release and cannot be written.' };
+  const f = releaseFile(img, what);
+  const url = proxyUrl(base, img, what);
+  if (!f || !url) return { error: 'This release has no such file for the board.' };
+  const host = new URL(base).host;
+  try {
+    const file = await downloadVerified(url, f, onProgress, fetchFn);
+    return { token: `web-${++tokens}`, url: '', file, size: file.size, sha256: expectedHashes(img, what).written, name: file.name };
+  } catch (e) {
+    return { error: `The download through ${host} did not work: ${(e as Error).message}.` };
+  }
+}
+
 export const webApi: ImagerApi = {
   platform: 'web',
   version: typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev',
@@ -144,6 +176,8 @@ export const webApi: ImagerApi = {
     if (!file) return null;
     return { token: `web-${++tokens}`, url: '', file, size: file.size, sha256: null, name: file.name };
   },
+  downloadProxy: DOWNLOAD_PROXY ? new URL(DOWNLOAD_PROXY).host : null,
+  downloadReleaseFile: (imageId, what, onProgress) => fetchReleaseFile(DOWNLOAD_PROXY, writable.get(imageId), what, onProgress),
   releaseMaskrom: async () => {},
   onUsbChoice: () => () => {},
   answerUsbChoice: () => {},

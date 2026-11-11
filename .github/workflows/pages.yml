@@ -40,6 +40,10 @@ jobs:
       - run: node scripts/build-web.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # The Roxora download proxy (worker/). A repository variable, empty
+          # until the Worker is deployed; then the page downloads release
+          # files itself.
+          ROXORA_DOWNLOAD_PROXY: ${{ vars.ROXORA_DOWNLOAD_PROXY }}
       - uses: actions/upload-pages-artifact@v3
         with:
           path: web-dist

@@ -44,6 +44,18 @@ export interface ImagerApi {
    */
   pickReleaseFile?(imageId: string, what: 'image' | 'spi', onProgress: (done: number, total: number) => void):
     Promise<PreparedFile | { error: string } | null>;
+  /**
+   * Web build with a download proxy: its host name, shown to the user.
+   * Null or missing when the build has none.
+   */
+  downloadProxy?: string | null;
+  /**
+   * Web build with a download proxy: download the release file through it,
+   * checking size and SHA-256 while it streams. An error means the page
+   * falls back to pickReleaseFile.
+   */
+  downloadReleaseFile?(imageId: string, what: 'image' | 'spi', onProgress: (done: number, total: number) => void):
+    Promise<PreparedFile | { error: string }>;
   releaseMaskrom(token: string): Promise<void>;
   onUsbChoice(cb: (choices: { deviceId: string; productName?: string; productId: number }[]) => void): () => void;
   answerUsbChoice(deviceId: string): void;

@@ -18,6 +18,10 @@ try {
   if (r.ok) hasRelease = (await r.json()).some((x) => !x.draft);
 } catch { /* offline: link to the install notes */ }
 console.log(`desktop app released: ${hasRelease}`);
+// The Roxora download proxy (worker/), e.g. https://roxora-download.<account>.workers.dev.
+// Empty: the user downloads release files and chooses them.
+const downloadProxy = (process.env.ROXORA_DOWNLOAD_PROXY ?? '').trim();
+console.log(`download proxy: ${downloadProxy || 'none'}`);
 mkdirSync(`${out}/resources/xzwasm`, { recursive: true });
 
 const web = { bundle: true, platform: 'browser', target: 'chrome120', format: 'esm', minify: true, logLevel: 'warning' };
@@ -25,7 +29,7 @@ await build({
   ...web, entryPoints: { app: 'src/web/main.tsx' }, outdir: out,
   loader: { '.woff2': 'file', '.woff': 'file', '.ttf': 'file', '.svg': 'file', '.png': 'file', '.jpg': 'file' },
   assetNames: 'assets/[name]-[hash]', jsx: 'automatic',
-  define: { 'process.env.NODE_ENV': '"production"', __APP_VERSION__: JSON.stringify(version), __APP_HAS_RELEASE__: JSON.stringify(hasRelease) },
+  define: { 'process.env.NODE_ENV': '"production"', __APP_VERSION__: JSON.stringify(version), __APP_HAS_RELEASE__: JSON.stringify(hasRelease), __DOWNLOAD_PROXY__: JSON.stringify(downloadProxy) },
 });
 await build({ ...web, entryPoints: { 'maskrom-worker': 'src/maskrom/worker.ts' }, outdir: out });
 cpSync('src/web/index.html', `${out}/index.html`);

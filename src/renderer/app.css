@@ -16,6 +16,7 @@ html, body, #root { height: 100%; }
 .dest-card { margin-bottom: var(--pf-t--global--spacer--md); }
 .dest-card .pf-v6-c-radio + .pf-v6-c-radio { margin-top: var(--pf-t--global--spacer--sm); }
 .file-row { display: flex; align-items: center; gap: var(--pf-t--global--spacer--md); margin: var(--pf-t--global--spacer--sm) 0 0 var(--pf-t--global--spacer--lg); }
+.file-row > .pf-v6-c-button { flex-shrink: 0; }
 .hidden-drives { margin-top: var(--pf-t--global--spacer--md); }
 .hidden-drives ul { margin: 0; padding-left: var(--pf-t--global--spacer--lg); }
 .dest-card .pf-v6-c-code-block { margin-top: var(--pf-t--global--spacer--sm); }
