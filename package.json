@@ -16,7 +16,9 @@
     "icons": "node scripts/icons.mjs",
     "e2e:maskrom": "node scripts/electron-maskrom-e2e.mjs",
     "shots": "node scripts/shots.mjs dev/shots",
-    "writer": "node scripts/build-writer.mjs"
+    "writer": "node scripts/build-writer.mjs",
+    "build:web": "node scripts/build-web.mjs",
+    "test:webflash": "node --test test/webflash/*.test.js"
   },
   "dependencies": {
     "@balena/sudo-prompt": "9.2.1-workaround-windows-amperstand-in-username-0849e215b947987a643fe5763902aea201255534",

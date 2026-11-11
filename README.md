@@ -9,6 +9,12 @@ images in two ways:
 - **Board storage over USB (Maskrom).** Writes a board's eMMC or SPI NOR
   flash through its USB-C port, with the same read-back check.
 
+The same page also runs in the browser, Maskrom only, at
+https://roxora-os.github.io/imager/ (Chrome, Edge or another browser with
+WebUSB). A browser cannot open a disk, so it cannot write an SD card in the
+computer; there the release file is downloaded by hand, picked, and checked
+against the catalog before it is written.
+
 Status: first version, not yet tested on hardware. There are no Roxora
 releases yet; until there are, the app says so and has nothing to write.
 
@@ -23,6 +29,7 @@ Windows (x64), macOS (Apple silicon and Intel) and Linux (AppImage, .deb,
 | SD/USB writing | [etcher-sdk](https://github.com/balena-io-modules/etcher-sdk), in a helper process started with administrator rights the way Etcher starts its writer. |
 | Maskrom writing | rkdeveloptool compiled to WebAssembly with libusb's WebUSB backend, as in [edk2-webflash](https://github.com/gahingwoo/edk2-webflash), running in a worker inside the app. |
 | Interface | Electron, React and [PatternFly](https://www.patternfly.org/). |
+| Web version | The same React code with a browser adapter (`src/web/`). The xz decoder, image format checks and the cross-origin isolation service worker come from roxora-os/edk2-webflash (`src/web/webflash/`, `resources/xzwasm/`). |
 
 Safety rules:
 
@@ -48,6 +55,7 @@ npm run writer              # the SD/USB writer, Node.js packed with pkg
 sh scripts/build-wasm.sh    # needs emsdk 3.1.48; or take the CI artifact
 npm run build
 npm start                   # or: npx electron . --dev-sample
+node scripts/build-web.mjs  # the web version, into web-dist/ (?sample=1 shows the sample catalog)
 ```
 
 `--dev-sample` shows the sample catalog from the release contract. Those
@@ -59,7 +67,9 @@ entries are marked as samples and cannot be written.
 npm test                                   # catalog, targets, Maskrom through the WASM
 node scripts/electron-maskrom-e2e.mjs      # Maskrom path inside Electron
 node test/e2e/sd-loop.mjs                  # SD write to a loop device (Linux, sudo)
+node --test test/webflash/*.test.js        # modules copied from edk2-webflash
 node scripts/shots.mjs dev/shots           # screenshots, light and dark
+node scripts/web-shots.mjs dev/web-shots   # the web version, served under /imager/
 ```
 
 The Maskrom tests use a pretend board (`test/fake-rockchip.ts`) that speaks

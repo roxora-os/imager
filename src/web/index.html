@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Roxora Imager</title>
+  <meta name="description" content="Write Roxora images to a board's eMMC, SPI NOR or SD card over USB, from the browser.">
+  <link rel="icon" href="resources/roxora-mark.svg" type="image/svg+xml">
+  <script>
+    // Cross-origin isolation through a service worker, as edk2-webflash does
+    // it (coi-serviceworker.js): GitHub Pages cannot send COOP/COEP headers.
+    // The first visit registers it and reloads once.
+    if (!self.crossOriginIsolated && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./coi-serviceworker.js', { scope: './' }).then(function () {
+        var k = 'coi-reloaded';
+        try { if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, '1'); } catch (e) { return; }
+        location.reload();
+      }, function (e) { console.warn('service worker:', e); });
+    }
+  </script>
+  <script src="theme.js"></script>
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

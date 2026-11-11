@@ -19,6 +19,8 @@ export type JobResult = { ok: true; sha256: string } | { ok: false; reason: stri
 export interface PreparedFile {
   token: string;
   url: string;
+  /** Web build: the picked file itself; the worker reads it. */
+  file?: File;
   size: number;
   /** SHA-256 the written bytes must have, or null for a local file without one. */
   sha256: string | null;
@@ -36,6 +38,12 @@ export interface ImagerApi {
   onProgress(cb: (p: JobProgress) => void): () => void;
   prepareMaskrom(imageId: string, what?: 'image' | 'spi'): Promise<PreparedFile | { error: string }>;
   pickMaskromFile(): Promise<PreparedFile | { error: string } | null>;
+  /**
+   * Web build only: the user picks the release file they downloaded; it is
+   * checked against the catalog before it is accepted.
+   */
+  pickReleaseFile?(imageId: string, what: 'image' | 'spi', onProgress: (done: number, total: number) => void):
+    Promise<PreparedFile | { error: string } | null>;
   releaseMaskrom(token: string): Promise<void>;
   onUsbChoice(cb: (choices: { deviceId: string; productName?: string; productId: number }[]) => void): () => void;
   answerUsbChoice(deviceId: string): void;

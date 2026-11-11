@@ -34,11 +34,17 @@ jobs:
       - run: npm run typecheck
       - name: Unit tests (catalog, targets, Maskrom through the WASM against a pretend board)
         run: npm test
+      - name: Tests of the modules copied from edk2-webflash (xz, image source)
+        run: node --test test/webflash/*.test.js
+      - name: Web build
+        run: node scripts/build-web.mjs
       - run: npm run build
       - name: Maskrom path inside Electron against a pretend board
         run: xvfb-run -a node scripts/electron-maskrom-e2e.mjs
       - name: Screenshots
-        run: xvfb-run -a node scripts/shots.mjs shots
+        run: |
+          xvfb-run -a node scripts/shots.mjs shots
+          xvfb-run -a node scripts/web-shots.mjs shots/web
       - uses: actions/upload-artifact@v4
         with:
           name: screenshots
