@@ -33,8 +33,9 @@ Pages workflow takes it from the repository variable of the same name). It is
 empty until the Worker is deployed. The desktop app downloads directly and
 does not use it.
 
-Status: first version, not yet tested on hardware. There are no Roxora
-releases yet; until there are, the app says so and has nothing to write.
+Status: first version, not yet tested on hardware. It lists the Roxora
+pre-releases, which are built and checked in CI but not yet booted on
+hardware either.
 
 ## Install
 
