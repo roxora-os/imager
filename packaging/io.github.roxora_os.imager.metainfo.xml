@@ -25,13 +25,8 @@
     <binary>roxora-imager</binary>
     <modalias>usb:v2207p*</modalias>
   </provides>
-  <recommends>
-    <!-- Images come from the releases; Rockchip's loader from rkbin on first use. -->
-    <internet>always</internet>
-  </recommends>
   <url type="homepage">https://github.com/roxora-os/imager</url>
   <url type="bugtracker">https://github.com/roxora-os/imager/issues</url>
-  <url type="vcs-browser">https://github.com/roxora-os/imager</url>
   <content_rating type="oars-1.1"/>
   <releases>
     <release version="0.1.0" date="2026-11-11">
