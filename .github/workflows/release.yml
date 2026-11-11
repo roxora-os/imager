@@ -57,7 +57,7 @@ jobs:
           NODE_ENV: production
       - run: npm run icons
       - name: Electron app and AppImage
-        run: npx electron-builder --linux dir AppImage --${{ matrix.eb }}
+        run: npx electron-builder --linux dir AppImage --${{ matrix.eb }} --publish never
       - name: Name the AppImage
         run: |
           V=$(node -p "require('./package.json').version")
@@ -162,7 +162,11 @@ jobs:
       - run: npm run icons
       - run: brew install create-dmg
       - name: Electron app
-        run: npx electron-builder --mac dir --${{ matrix.eb }}
+        run: |
+          npx electron-builder --mac dir --${{ matrix.eb }} --publish never
+          app=$(ls -d dist/${{ matrix.out }}/*.app | head -1)
+          [ "$app" = "dist/${{ matrix.out }}/Roxora Imager.app" ] || mv "$app" "dist/${{ matrix.out }}/Roxora Imager.app"
+          ls "dist/${{ matrix.out }}/Roxora Imager.app/Contents/MacOS" "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Resources"
       # Developer ID + hardened runtime when the signing secrets are set,
       # ad hoc otherwise.
       - name: Sign the app
@@ -174,7 +178,7 @@ jobs:
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: bash packaging/macos-sign.sh app "dist/${{ matrix.out }}/Roxora Imager.app"
       - name: Confirm the architecture
-        run: file "dist/${{ matrix.out }}/Roxora Imager.app/Contents/MacOS/Roxora Imager"
+        run: file "dist/${{ matrix.out }}/Roxora Imager.app/Contents/MacOS/"*
       - name: Create the DMG
         run: |
           V=$(node -p "require('./package.json').version")
@@ -191,7 +195,8 @@ jobs:
         run: |
           set +e
           # macOS has no timeout(1); SIGALRM after 30 s gives 142.
-          perl -e 'alarm 30; exec @ARGV' "dist/${{ matrix.out }}/Roxora Imager.app/Contents/MacOS/Roxora Imager" > /tmp/app.log 2>&1
+          exe=$(ls "dist/${{ matrix.out }}/Roxora Imager.app/Contents/MacOS/"* | head -1)
+          perl -e 'alarm 30; exec @ARGV' "$exe" > /tmp/app.log 2>&1
           rc=$?
           cat /tmp/app.log
           [ "$rc" = 142 ] || { echo "FAIL: exited with $rc"; exit 1; }
@@ -238,7 +243,7 @@ jobs:
       - run: npm run icons
       # Unsigned: SmartScreen will warn. See docs/install.md.
       - name: Installer and zip
-        run: npx electron-builder --win nsis zip --x64
+        run: npx electron-builder --win nsis zip --x64 --publish never
       - name: Name the zip
         run: |
           V=$(node -p "require('./package.json').version")
