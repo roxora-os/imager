@@ -9,3 +9,5 @@ vendor/
 *.img
 *.img.xz
 .DS_Store
+build-res/
+shots/
