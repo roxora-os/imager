@@ -7,7 +7,7 @@ export interface MaskromJob {
   cancel(): void;
 }
 
-export function startMaskrom(req: Omit<WorkerRequest, 'type' | 'moduleUrl' | 'wasmUrl' | 'loaderUrl'> & { loader: string },
+export function startMaskrom(req: Omit<WorkerRequest, 'type' | 'moduleUrl' | 'wasmUrl' | 'loaderUrl' | 'xzWasmUrl'> & { loader: string },
   on: { log(line: string): void; stage(s: Stage, detail?: string): void; progress(s: Stage, pct: number): void }): MaskromJob {
   const w = new Worker('maskrom-worker.js', { type: 'module' });
   let resolve!: (r: FlashResult) => void;
@@ -20,12 +20,13 @@ export function startMaskrom(req: Omit<WorkerRequest, 'type' | 'moduleUrl' | 'wa
     else if (m.type === 'result') { resolve(m.result); w.terminate(); }
   };
   w.onerror = (e) => { resolve({ ok: false, reason: 'The Maskrom writer stopped.', detail: e.message }); w.terminate(); };
-  const base = location.origin;
+  // Relative to the page: app://local/ in Electron, .../imager/ on the web.
+  const at = (p: string) => new URL(p, document.baseURI).href;
   const { loader, ...rest } = req;
   w.postMessage({
     type: 'start', ...rest,
-    moduleUrl: `${base}/wasm/rkdeveloptool.js`, wasmUrl: `${base}/wasm/rkdeveloptool.wasm`,
-    loaderUrl: `${base}/resources/${loader}`,
+    moduleUrl: at('wasm/rkdeveloptool.js'), wasmUrl: at('wasm/rkdeveloptool.wasm'),
+    loaderUrl: at(`resources/${loader}`), xzWasmUrl: at('resources/xzwasm/xzwasm.wasm'),
   } satisfies WorkerRequest);
   return {
     done,

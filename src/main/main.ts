@@ -231,6 +231,7 @@ app.whenReady().then(() => {
   const testVid = !app.isPackaged ? Number(process.env.ROXORA_IMAGER_USB_TEST_VID ?? NaN) : NaN;
   const vendorIds = Number.isInteger(testVid) ? [ROCKCHIP_VID, testVid] : [ROCKCHIP_VID];
   if (!app.isPackaged && process.env.ROXORA_IMAGER_TEST_SERVE) serveFileAs('test', process.env.ROXORA_IMAGER_TEST_SERVE);
+  if (!app.isPackaged && process.env.ROXORA_IMAGER_TEST_SERVE_XZ) serveFileAs('xz', process.env.ROXORA_IMAGER_TEST_SERVE_XZ);
   installUsbHandlers(session.defaultSession, { origins: [ORIGIN], vendorIds }, askUsb);
   createWindow();
 });

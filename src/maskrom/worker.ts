@@ -9,10 +9,44 @@
 import { createRunner } from './runner';
 import { flash, type FlashPlan, type Stage } from './sequence';
 import type { ByteSource } from './rkcore';
+import { rawSource, xzSource } from './file-source';
+import { detectFormat, hasSpecialMagic } from '../web/webflash/image-source.js';
+import { XzDecoder, xzUncompressedSize } from '../web/webflash/xz.js';
+
+/** A source over a picked File: raw as it is, .xz decompressed as it is read. */
+async function pickedFileSource(file: File, xzWasmUrl: string): Promise<ByteSource> {
+  const FRS = (self as unknown as { FileReaderSync: new () => { readAsArrayBuffer(b: Blob): ArrayBuffer } }).FileReaderSync;
+  const reader = new FRS();
+  const read = (p: number, n: number) => new Uint8Array(reader.readAsArrayBuffer(file.slice(p, p + n)));
+  const fmt = detectFormat(read(0, Math.min(16, file.size)), file.name);
+  let src: ByteSource;
+  if (fmt.format === 'raw') {
+    src = rawSource(file.size, read);
+  } else if (fmt.format === 'xz') {
+    const size = await xzUncompressedSize(async (a: number, b: number) => read(a, b - a), file.size);
+    if (!size) throw new Error(`${file.name} does not look like a complete .xz file.`);
+    const mod = await WebAssembly.compile(await (await fetch(xzWasmUrl)).arrayBuffer());
+    src = xzSource(file.size, size, read, () => new XzDecoder(new WebAssembly.Instance(mod, {})));
+  } else if (fmt.format === 'gzip') {
+    throw new Error(`${file.name} is gzip-compressed. Use the .img.xz from the release, or an uncompressed .img.`);
+  } else {
+    throw new Error(fmt.message);
+  }
+  // rkdeveloptool's wl writes a file starting with these as sparse or UBI.
+  if (hasSpecialMagic(src.read(0, Math.min(4, src.size)))) {
+    throw new Error(`${file.name} starts like an Android sparse or UBI image, which this writer does not handle.`);
+  }
+  return src;
+}
 
 export type WorkerRequest =
-  | { type: 'start'; moduleUrl: string; wasmUrl: string; loaderUrl: string; fileUrl: string; size: number;
-      sha256: string | null; storageCode: number; storageLabel: string; verify: boolean; resetAfter: boolean };
+  | { type: 'start'; moduleUrl: string; wasmUrl: string; loaderUrl: string;
+      /** Electron: the prepared file, served by the main process. */
+      fileUrl?: string;
+      /** Web: the file the user picked (.img or .img.xz), read here. */
+      file?: File; xzWasmUrl?: string;
+      size: number; sha256: string | null; storageCode: number; storageLabel: string;
+      verify: boolean; resetAfter: boolean; reconnectTimeout?: number };
 
 export type WorkerEvent =
   | { type: 'log'; line: string }
@@ -71,10 +105,12 @@ self.addEventListener('message', async (ev: MessageEvent<WorkerRequest>) => {
       locateFile: (p) => (p.endsWith('.wasm') ? m.wasmUrl : p),
     });
     const loader = new Uint8Array(await (await fetch(m.loaderUrl)).arrayBuffer());
+    const source = m.file ? await pickedFileSource(m.file, m.xzWasmUrl!) : xhrSource(m.fileUrl!, m.size);
     const plan: FlashPlan = {
       loader, storageCode: m.storageCode, storageLabel: m.storageLabel,
-      source: xhrSource(m.fileUrl, m.size), expectedSha256: m.sha256,
+      source, expectedSha256: m.sha256,
       verify: m.verify, resetAfter: m.resetAfter,
+      ...(m.reconnectTimeout ? { reconnectTimeout: m.reconnectTimeout } : {}),
     };
     let lastPct = -1;
     const result = await flash(runner, plan, {

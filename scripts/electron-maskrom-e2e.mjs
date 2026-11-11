@@ -8,6 +8,7 @@ import { _electron as electron } from 'playwright-core';
 import { build } from 'esbuild';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -18,15 +19,19 @@ const size = 20 * 1024 * 1024 + 4321;
 const data = randomBytes(size);
 writeFileSync(join(dir, 'image.img'), data);
 const sha = createHash('sha256').update(data).digest('hex');
+// The web build's path: the same image as a picked .img.xz, decompressed in
+// the worker with edk2-webflash's xz decoder.
+execFileSync('xz', ['-1', '-k', '--check=crc64', join(dir, 'image.img')]);
 
-const env = { ...process.env, ROXORA_IMAGER_HIDDEN: '1', ROXORA_IMAGER_TEST_SERVE: join(dir, 'image.img') };
+const env = { ...process.env, ROXORA_IMAGER_HIDDEN: '1', ROXORA_IMAGER_TEST_SERVE: join(dir, 'image.img'),
+  ROXORA_IMAGER_TEST_SERVE_XZ: join(dir, 'image.img.xz') };
 delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: ['.'], env });
 let ok = false;
 try {
   const page = await app.firstWindow();
   await page.waitForLoadState('domcontentloaded');
-  const res = await page.evaluate(async ({ size, sha }) => {
+  const runOne = (picked) => page.evaluate(async ({ size, sha, picked }) => {
     const w = new Worker('fake-flash-worker.js', { type: 'module' });
     const stages = [];
     let lastWrite = -1;
@@ -39,22 +44,31 @@ try {
         if (m.type === 'result') resolve(m.result);
       };
       const o = location.origin;
-      w.postMessage({ type: 'start', moduleUrl: `${o}/wasm/rkdeveloptool.js`, wasmUrl: `${o}/wasm/rkdeveloptool.wasm`,
-        loaderUrl: `${o}/resources/rk3576_spl_loader.bin`, fileUrl: `${o}/file/test`, size, sha256: sha,
-        storageCode: 1, storageLabel: 'eMMC', verify: true, resetAfter: true });
+      const go = (src) => w.postMessage({ type: 'start', moduleUrl: `${o}/wasm/rkdeveloptool.js`, wasmUrl: `${o}/wasm/rkdeveloptool.wasm`,
+        loaderUrl: `${o}/resources/rk3576_spl_loader.bin`, xzWasmUrl: `${o}/resources/xzwasm/xzwasm.wasm`, size, sha256: sha,
+        storageCode: 1, storageLabel: 'eMMC', verify: true, resetAfter: true, ...src });
+      if (picked) {
+        fetch(`${o}/file/xz`).then((r) => r.blob()).then((b) => go({ file: new File([b], 'image.img.xz') }));
+      } else {
+        go({ fileUrl: `${o}/file/test` });
+      }
     });
     const dump = await new Promise((resolve) => {
       w.onmessage = (e) => { if (e.data.type === 'dump') resolve(e.data); };
       w.postMessage({ type: 'dump', storage: 1, size });
     });
-    return { crossOriginIsolated: self.crossOriginIsolated, result, stages, lastWrite, dump };
-  }, { size, sha });
-  console.log(JSON.stringify(res, null, 2));
-  ok = res.result?.ok === true && res.result.verified === 'match' && res.dump.sha256 === sha && res.dump.resets === 1;
+    return { picked, crossOriginIsolated: self.crossOriginIsolated, result, stages, lastWrite, dump };
+  }, { size, sha, picked });
+  const check = (res) => res.result?.ok === true && res.result.verified === 'match' && res.dump.sha256 === sha && res.dump.resets === 1;
+  const a = await runOne(false);
+  console.log(JSON.stringify(a, null, 2));
+  const b = await runOne(true);
+  console.log(JSON.stringify(b, null, 2));
+  ok = check(a) && check(b);
 } finally {
   await app.close();
   rmSync('build/renderer/fake-flash-worker.js', { force: true });
   rmSync(dir, { recursive: true, force: true });
 }
-console.log(ok ? 'PASS: image written to the pretend eMMC through the Electron worker and verified' : 'FAIL');
+console.log(ok ? 'PASS: image written to the pretend eMMC through the Electron worker and verified, from a served file and from a picked .img.xz' : 'FAIL');
 process.exit(ok ? 0 : 1);
