@@ -1,3 +1,4 @@
+# Copied from gahingwoo/edk2-webflash (CMakeLists.wasm.txt); used by scripts/build-wasm.sh.
 cmake_minimum_required(VERSION 3.16)
 project(rkdeveloptool_wasm LANGUAGES C CXX)
 
@@ -44,7 +45,7 @@ target_link_options(rkdeveloptool PRIVATE
   # C++20 coroutines in emscripten_webusb.cpp require the emval handles and
   # coroutine resume machinery to work correctly.  Adding ASSERTIONS=0 disables
   # the pthread_equal guard but does not fix the underlying emval use-after-free
-  # that surfaces next — so we leave it at the default (ASSERTIONS=1 in Debug,
+  # that surfaces next, so we leave it at the default (ASSERTIONS=1 in Debug,
   # 0 in Release via CMAKE_BUILD_TYPE=Release which Emscripten maps to -O3).
   "-sUSE_PTHREADS=0"
   "-sALLOW_MEMORY_GROWTH=1"
