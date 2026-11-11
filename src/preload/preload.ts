@@ -15,7 +15,7 @@ const api: ImagerApi = {
     ipcRenderer.on('job:progress', h);
     return () => { ipcRenderer.off('job:progress', h); };
   },
-  prepareMaskrom: (imageId) => ipcRenderer.invoke('maskrom:prepare', imageId),
+  prepareMaskrom: (imageId, what) => ipcRenderer.invoke('maskrom:prepare', imageId, what ?? 'image'),
   pickMaskromFile: () => ipcRenderer.invoke('maskrom:pick'),
   releaseMaskrom: (token) => ipcRenderer.invoke('maskrom:release', token),
   onUsbChoice: (cb) => {

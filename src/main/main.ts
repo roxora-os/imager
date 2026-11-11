@@ -153,12 +153,19 @@ async function prepare(wc: WebContents, path: string, name: string, expected: { 
 
 const temporary = new Set<string>();
 
-ipcMain.handle('maskrom:prepare', async (e, imageId: string) => {
+ipcMain.handle('maskrom:prepare', async (e, imageId: string, what: 'image' | 'spi' = 'image') => {
   const img = writableImage(imageId);
   if (!img || img.sample) return { error: 'This image is not from a published release and cannot be written.' };
+  if (what === 'spi' && !img.spi) return { error: 'This release has no SPI bootloader for the board.' };
   if (job) return { error: 'Another job is running.' };
   job = new AbortController();
   try {
+    if (what === 'spi') {
+      // A plain image: served as it is, and the read-back is compared with its release sha256.
+      const spi = img.spi!;
+      const file = await fetchImage({ ...spi, sample: img.sample }, cacheDir(), (p) => sendProgress(e.sender, p), job.signal);
+      return await prepare(e.sender, file, spi.file, { size: spi.size, sha256: spi.sha256 }, job.signal);
+    }
     const file = await fetchImage(img, cacheDir(), (p) => sendProgress(e.sender, p), job.signal);
     return await prepare(e.sender, file, img.file, { size: img.extractSize, sha256: img.extractSha256 }, job.signal);
   } catch (err) {

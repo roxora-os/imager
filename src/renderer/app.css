@@ -35,3 +35,21 @@ html, body, #root { height: 100%; }
 .settings { display: grid; gap: var(--pf-t--global--spacer--lg); }
 .settings-label { margin-bottom: var(--pf-t--global--spacer--sm); }
 .usb-choice { display: block; margin-top: var(--pf-t--global--spacer--sm); }
+
+/* Board step: search, then vendors beside boards; below md the vendors are a select. */
+.board-search { max-width: 36rem; margin-bottom: var(--pf-t--global--spacer--md); }
+.board-panes { display: grid; gap: var(--pf-t--global--spacer--lg); }
+.vendor-pane { display: none; }
+.vendor-select { max-width: 36rem; }
+.vendor-row { display: flex; justify-content: space-between; gap: var(--pf-t--global--spacer--md); width: 100%; }
+.vendor-count { color: var(--pf-t--global--text--color--subtle); font-variant-numeric: tabular-nums; }
+.pf-v6-c-menu__item.pf-m-disabled .vendor-count { color: inherit; }
+.no-match { color: var(--pf-t--global--text--color--subtle); }
+@media (min-width: 48rem) {
+  .board-panes { grid-template-columns: 14rem minmax(0, 1fr); align-items: start; }
+  .vendor-pane { display: block; border-right: var(--pf-t--global--border--width--regular) solid var(--pf-t--global--border--color--default); padding-right: var(--pf-t--global--spacer--sm); }
+  .vendor-select { display: none; }
+}
+@media (min-width: 48rem) {
+  .board-pane .pf-v6-c-table .pf-v6-c-table__td.nowrap-md, .board-pane .pf-v6-c-table td.nowrap-md { white-space: nowrap; }
+}

@@ -4,10 +4,12 @@ import {
   DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, EmptyState, EmptyStateBody,
   EmptyStateFooter, ExpandableSection, Masthead, MastheadBrand, MastheadContent, MastheadLogo, MastheadMain,
   Modal, ModalBody, ModalFooter, ModalHeader, Page, PageSection, Progress, ProgressMeasureLocation, Radio,
+  SearchInput, Menu, MenuContent, MenuItem, MenuList, FormSelect, FormSelectOption,
   Spinner, Switch, Title, ToggleGroup, ToggleGroupItem, Wizard, WizardFooterWrapper, WizardStep, useWizardContext,
 } from '@patternfly/react-core';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { groupByBoard, type Board, type CatalogImage } from '../shared/catalog';
+import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../shared/boardsearch';
 import { formatBytes, statusWords } from '../shared/format';
 import type { CatalogResult, ImagerApi, JobProgress, PreparedFile } from '../shared/ipc';
 import type { HiddenDrive, Target } from '../shared/targets';
@@ -22,7 +24,7 @@ declare global {
 const api = window.imager;
 
 type Method = 'sd' | 'maskrom';
-type MaskromSource = 'release' | 'file';
+type MaskromSource = 'release' | 'spi' | 'file';
 
 interface Run {
   kind: Method;
@@ -32,6 +34,13 @@ interface Run {
 }
 
 const RELEASES_URL = 'https://github.com/roxora-os/build/releases';
+
+/** What a Maskrom write takes by default: the whole image where it fits, else the release's SPI bootloader, else a file. */
+function defaultSource(m: ReturnType<typeof maskromBoard>, img: CatalogImage | undefined): MaskromSource {
+  if (m?.imageStorage) return 'release';
+  if (img?.spi && m?.storages.includes('spinor')) return 'spi';
+  return 'file';
+}
 
 function releaseWords(img: CatalogImage): string {
   return img.releaseInfo.prerelease ? `Pre-release ${img.releaseInfo.version}` : `Release ${img.releaseInfo.version}`;
@@ -57,9 +66,11 @@ function Shell({ children, onSettings }: { children: React.ReactNode; onSettings
   return <Page masthead={masthead}>{children}</Page>;
 }
 
-function BoardStep({ catalog, boards, board, setBoard, reload }: {
+interface FindState { query: string; setQuery: (q: string) => void; vendor: string; setVendor: (v: string) => void }
+
+function BoardStep({ catalog, boards, board, setBoard, reload, find }: {
   catalog: CatalogResult | null; boards: Board[]; board: string | null;
-  setBoard: (b: string) => void; reload: () => void;
+  setBoard: (b: string) => void; reload: () => void; find: FindState;
 }) {
   if (!catalog) return <EmptyState titleText="Loading releases" headingLevel="h2" icon={Spinner} />;
   if (catalog.state === 'error') {
@@ -84,23 +95,90 @@ function BoardStep({ catalog, boards, board, setBoard, reload }: {
       </EmptyState>
     );
   }
+  return <BoardPicker boards={boards} board={board} setBoard={setBoard} find={find} />;
+}
+
+const ALL = '__all';
+
+function BoardPicker({ boards, board, setBoard, find }: {
+  boards: Board[]; board: string | null; setBoard: (b: string) => void; find: FindState;
+}) {
+  const { query, setQuery, vendor, setVendor } = find;
+  const searching = queryWords(query).length > 0;
+  const counts = useMemo(() => vendorCounts(boards, query), [boards, query]);
+  const shown = useMemo(() => visibleBoards(boards, vendor === ALL ? null : vendor, query), [boards, vendor, query]);
+  const total = searching ? shown.length : boards.length;
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => { box.current?.querySelector<HTMLInputElement>('input')?.focus(); }, []);
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && searching && shown.length === 1) {
+      e.preventDefault();
+      setBoard(shown[0].board);
+    }
+  };
+  const vendorLabel = (v: string, n: number) => `${v} (${n})`;
+  // A search covers every vendor, so the list shows "All vendors" while one
+  // runs; picking a vendor ends the search.
+  const active = searching ? ALL : vendor;
+  const pick = (v: string) => { setVendor(v); if (searching) setQuery(''); };
+
   return (
     <>
       <Title headingLevel="h2" className="step-title">Board</Title>
       <Content component="p" className="step-lead">Choose the board you want to install Roxora on.</Content>
-      <Table aria-label="Boards" variant="compact">
-        <Thead><Tr><Th screenReaderText="Select" /><Th>Board</Th><Th>SoC</Th><Th>Newest image</Th></Tr></Thead>
-        <Tbody>
-          {boards.map((b, i) => (
-            <Tr key={b.board} isClickable onRowClick={() => setBoard(b.board)} isRowSelected={board === b.board}>
-              <Td select={{ rowIndex: i, variant: 'radio', isSelected: board === b.board, onSelect: () => setBoard(b.board) }} />
-              <Td dataLabel="Board">{b.boardName}</Td>
-              <Td dataLabel="SoC">{b.soc.toUpperCase()}</Td>
-              <Td dataLabel="Newest image">{releaseWords(b.images[0])}, {b.images[0].status === 'hardware-tested' ? 'tested on hardware' : 'not yet tested on hardware'}</Td>
-            </Tr>
-          ))}
-        </Tbody>
-      </Table>
+      <div ref={box} onKeyDown={onKeyDown} className="board-search">
+        <SearchInput placeholder="Search boards, vendors or SoCs" value={query} aria-label="Search boards, vendors or SoCs"
+          onChange={(_e, v) => setQuery(v)} onClear={() => setQuery('')} />
+      </div>
+      <div className="board-panes">
+        <div className="vendor-pane">
+          <Menu isPlain activeItemId={active} onSelect={(_e, id) => pick(String(id ?? ALL))} aria-label="Vendors">
+            <MenuContent>
+              <MenuList>
+                <MenuItem itemId={ALL} isActive={active === ALL}>
+                  <span className="vendor-row"><span>All vendors</span><span className="vendor-count">{total}</span></span>
+                </MenuItem>
+                {counts.map((c) => (
+                  <MenuItem key={c.vendor} itemId={c.vendor} isActive={active === c.vendor} isDisabled={searching && c.count === 0}>
+                    <span className="vendor-row"><span>{c.vendor}</span><span className="vendor-count">{c.count}</span></span>
+                  </MenuItem>
+                ))}
+              </MenuList>
+            </MenuContent>
+          </Menu>
+        </div>
+        <div className="vendor-select">
+          <FormSelect value={active} onChange={(_e, v) => pick(v)} aria-label="Vendor">
+            <FormSelectOption value={ALL} label={vendorLabel('All vendors', total)} />
+            {counts.map((c) => (
+              <FormSelectOption key={c.vendor} value={c.vendor} label={vendorLabel(c.vendor, c.count)} isDisabled={searching && c.count === 0} />
+            ))}
+          </FormSelect>
+        </div>
+        <div className="board-pane">
+          {shown.length === 0 ? (
+            <Content component="p" className="no-match">
+              No board matches &ldquo;{query.trim()}&rdquo;.{' '}
+              <Button variant="link" isInline component="a" href={BOARD_REQUEST_URL} target="_blank">Ask for a board to be supported</Button>
+            </Content>
+          ) : (
+            <Table aria-label="Boards" variant="compact">
+              <Thead><Tr><Th screenReaderText="Select" /><Th>Board</Th><Th>SoC</Th><Th>Newest image</Th></Tr></Thead>
+              <Tbody>
+                {shown.map((b, i) => (
+                  <Tr key={b.board} isClickable onRowClick={() => setBoard(b.board)} isRowSelected={board === b.board}>
+                    <Td select={{ rowIndex: i, variant: 'radio', isSelected: board === b.board, onSelect: () => setBoard(b.board) }} />
+                    <Td dataLabel="Board" className="nowrap-md">{b.boardName}</Td>
+                    <Td dataLabel="SoC" className="nowrap-md">{b.soc.toUpperCase()}</Td>
+                    <Td dataLabel="Newest image">{releaseWords(b.images[0])}, {b.images[0].status === 'hardware-tested' ? 'tested on hardware' : 'not yet tested on hardware'}</Td>
+                  </Tr>
+                ))}
+              </Tbody>
+            </Table>
+          )}
+        </div>
+      </div>
     </>
   );
 }
@@ -239,6 +317,13 @@ function DestinationStep(p: {
                 isDisabled={mb.imageStorage === null || p.storage !== mb.imageStorage}
                 label={p.image ? `The image chosen in the previous step (${p.image.file})` : 'The image chosen in the previous step'}
                 description={mb.imageStorage === null ? mb.imageNote : p.storage !== mb.imageStorage ? `A whole image goes to ${STORAGES[mb.imageStorage].label}.` : undefined} />
+              {mb.storages.includes('spinor') && (
+                <Radio id="src-spi" name="source" isChecked={p.source === 'spi'} onChange={() => p.setSource('spi')}
+                  isDisabled={!p.image?.spi || p.storage !== 'spinor'}
+                  label={p.image?.spi ? `This release's SPI bootloader (${p.image.spi.file}, ${formatBytes(p.image.spi.size)})` : "This release's SPI bootloader"}
+                  description={!p.image?.spi ? 'This release has no SPI bootloader for the board.'
+                    : 'Downloaded from the release and checked against its SHA-256, then read back after writing.'} />
+              )}
               <Radio id="src-file" name="source" isChecked={p.source === 'file'} onChange={() => p.setSource('file')}
                 label="A file on this computer" description="An image or bootloader file (.img, .bin, or compressed with xz, gzip or bzip2). It is written from the first sector." />
               {p.source === 'file' && (
@@ -362,6 +447,8 @@ export function App() {
   const [catalog, setCatalog] = useState<CatalogResult | null>(null);
   const [useSample, setUseSample] = useState(api.devSample);
   const [board, setBoard] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [vendor, setVendor] = useState('__all');
   const [imageId, setImageId] = useState<string | null>(null);
   const [method, setMethod] = useState<Method>('sd');
   const [drives, setDrives] = useState<{ targets: Target[]; hidden: HiddenDrive[] } | null>(null);
@@ -399,8 +486,14 @@ export function App() {
     setImageId(bb?.images[0]?.id ?? null);
     const m = maskromBoard(b);
     setStorage(m?.imageStorage ?? m?.storages[0] ?? null);
-    setSource(m?.imageStorage ? 'release' : 'file');
+    setSource(defaultSource(m, bb?.images[0]));
   };
+
+  // Another image of the same board may or may not carry an SPI bootloader.
+  useEffect(() => {
+    if (source === 'spi' && !image?.spi) setSource('file');
+    else if (source === 'file' && !file && image?.spi && mb && !mb.imageStorage && storage === 'spinor') setSource('spi');
+  }, [imageId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const refreshDrives = useCallback(() => {
     setDrives(null);
@@ -423,7 +516,9 @@ export function App() {
 
   const target = drives?.targets.find((t) => t.device === device);
   const destReady = method === 'sd' ? !!target
-    : !!storage && (source === 'file' ? !!file : !!image && mb?.imageStorage === storage);
+    : !!storage && (source === 'file' ? !!file
+      : source === 'spi' ? !!image?.spi && storage === 'spinor'
+        : !!image && mb?.imageStorage === storage);
 
   let why: string | null = null;
   if (sample) why = 'Sample data cannot be written.';
@@ -465,7 +560,7 @@ export function App() {
     const r: Run = {
       kind: 'maskrom', log: [], result: null,
       stages: [
-        { id: 'prepare', label: source === 'release' ? 'Download, check and decompress' : 'Prepare the file', percent: 0 },
+        { id: 'prepare', label: source === 'release' ? 'Download, check and decompress' : source === 'spi' ? 'Download and check' : 'Prepare the file', percent: 0 },
         { id: 'loader', label: 'Send the loader and wait for the board', percent: null },
         { id: 'write', label: `Write ${st.label}`, percent: 0 },
         { id: 'verify', label: 'Read back and compare', percent: 0 },
@@ -477,9 +572,9 @@ export function App() {
     const finish = (result: Run['result']) => setRun((cur) => cur && { ...cur, result });
 
     let prepared = file;
-    if (source === 'release' && image) {
+    if ((source === 'release' || source === 'spi') && image) {
       const off = api.onProgress((p) => setStage('prepare', { percent: p.total ? Math.min(100, Math.floor(p.bytes * 100 / p.total)) : null, detail: p.stage }));
-      const res = await api.prepareMaskrom(image.id);
+      const res = await api.prepareMaskrom(image.id, source === 'spi' ? 'spi' : 'image');
       off();
       if ('error' in res) { finish({ ok: false, title: res.error, text: 'Nothing was written.' }); return; }
       prepared = res;
@@ -501,7 +596,7 @@ export function App() {
     maskromJob.current = job;
     const res = await job.done;
     maskromJob.current = null;
-    if (source === 'release') api.releaseMaskrom(prepared.token);
+    if (source !== 'file') api.releaseMaskrom(prepared.token);
     finish(res.ok
       ? { ok: true, title: 'Written and verified', text: `${prepared.name} is on the ${st.label}. The read-back matches (SHA-256 ${res.sha256}).${settingsNow.resetAfterMaskrom ? ' The board is restarting.' : ''}` }
       : { ok: false, title: res.reason, text: 'Check the connection and the output below.', ...(res.detail ? { detail: res.detail } : {}) });
@@ -540,7 +635,8 @@ export function App() {
         <PageSection isFilled type="wizard" aria-label="Write an image">
           <Wizard navAriaLabel="Steps" isVisitRequired onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
             <WizardStep name="Board" id="board" footer={{ isNextDisabled: !board, isCancelHidden: true }}>
-              <BoardStep catalog={catalog} boards={boards} board={board} setBoard={chooseBoard} reload={load} />
+              <BoardStep catalog={catalog} boards={boards} board={board} setBoard={chooseBoard} reload={load}
+                find={{ query, setQuery, vendor, setVendor }} />
             </WizardStep>
             <WizardStep name="Image" id="image" isDisabled={!board} footer={{ isNextDisabled: !imageId, isCancelHidden: true }}>
               <ImageStep board={cur} imageId={imageId} setImage={setImageId} />
@@ -549,7 +645,7 @@ export function App() {
               <DestinationStep boardName={cur?.boardName ?? ''} boardId={board ?? ''} image={image}
                 method={method} setMethod={(m) => { setMethod(m); if (m === 'sd') refreshDrives(); }}
                 drives={drives} refreshDrives={refreshDrives} device={device} setDevice={setDevice}
-                storage={storage} setStorage={(s) => { setStorage(s); if (mb?.imageStorage !== s) setSource('file'); }}
+                storage={storage} setStorage={(s) => { setStorage(s); setSource(s === mb?.imageStorage ? 'release' : s === 'spinor' && image?.spi ? 'spi' : 'file'); }}
                 source={source} setSource={setSource} file={file} pickFile={pickFile} picking={picking} fileError={fileError} />
             </WizardStep>
             <WizardStep name="Review" id="review" isDisabled={!destReady}
@@ -564,6 +660,9 @@ export function App() {
                     <DescriptionListGroup><DescriptionListTerm>Release</DescriptionListTerm><DescriptionListDescription>{releaseWords(image)}, {image.releaseInfo.date}. {statusWords(image.status)}.</DescriptionListDescription></DescriptionListGroup>
                   </>
                 )}
+                {method === 'maskrom' && source === 'spi' && image?.spi && (
+                  <DescriptionListGroup><DescriptionListTerm>SPI bootloader</DescriptionListTerm><DescriptionListDescription>{image.spi.file}, {formatBytes(image.spi.size)}, from {releaseWords(image).toLowerCase()}</DescriptionListDescription></DescriptionListGroup>
+                )}
                 {method === 'maskrom' && source === 'file' && file && (
                   <DescriptionListGroup><DescriptionListTerm>File</DescriptionListTerm><DescriptionListDescription>{file.name}, {formatBytes(file.size)}</DescriptionListDescription></DescriptionListGroup>
                 )}
@@ -573,7 +672,7 @@ export function App() {
                 </DescriptionListDescription></DescriptionListGroup>
                 <DescriptionListGroup><DescriptionListTerm>Will be erased</DescriptionListTerm><DescriptionListDescription><strong>{erased}</strong></DescriptionListDescription></DescriptionListGroup>
                 <DescriptionListGroup><DescriptionListTerm>Checks</DescriptionListTerm><DescriptionListDescription>
-                  {method === 'sd' || source === 'release'
+                  {method === 'sd' || source === 'release' || source === 'spi'
                     ? 'The download is checked against the release SHA-256. After writing, the destination is read back and compared with the release SHA-256.'
                     : 'After writing, the storage is read back and compared with the file.'}
                 </DescriptionListDescription></DescriptionListGroup>

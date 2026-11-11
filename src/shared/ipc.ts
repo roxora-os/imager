@@ -34,7 +34,7 @@ export interface ImagerApi {
   writeSd(imageId: string, device: string): Promise<JobResult>;
   cancel(): Promise<void>;
   onProgress(cb: (p: JobProgress) => void): () => void;
-  prepareMaskrom(imageId: string): Promise<PreparedFile | { error: string }>;
+  prepareMaskrom(imageId: string, what?: 'image' | 'spi'): Promise<PreparedFile | { error: string }>;
   pickMaskromFile(): Promise<PreparedFile | { error: string } | null>;
   releaseMaskrom(token: string): Promise<void>;
   onUsbChoice(cb: (choices: { deviceId: string; productName?: string; productId: number }[]) => void): () => void;

@@ -24,11 +24,14 @@ async function sha256File(path: string, total: number, progress: Progress): Prom
   return h.digest('hex');
 }
 
+/** A release file the catalog describes: the .img.xz, or the SPI image. */
+export type ReleaseFile = Pick<CatalogImage, 'file' | 'url' | 'size' | 'sha256' | 'sample'>;
+
 /**
- * The .img.xz of a catalog image in the cache, downloaded if needed, always
- * checked against the catalog's sha256 before it is used.
+ * A release file in the cache, downloaded if needed, always checked against
+ * the catalog's sha256 before it is used.
  */
-export async function fetchImage(img: CatalogImage, cacheDir: string, progress: Progress, signal?: AbortSignal): Promise<string> {
+export async function fetchImage(img: ReleaseFile, cacheDir: string, progress: Progress, signal?: AbortSignal): Promise<string> {
   if (img.sample) throw new Error('Sample entries cannot be downloaded or written.');
   mkdirSync(cacheDir, { recursive: true });
   const dest = join(cacheDir, img.file);

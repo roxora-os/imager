@@ -98,9 +98,10 @@ filler", the write may be fine; note N and whether the board boots.
 
 1. Choose Radxa ROCK 4D, any image, Destination, Board storage over USB
    (Maskrom). The page says a whole image does not fit in SPI NOR.
-2. "A file on this computer": choose a SPI image (for example
-   `rock4d-spi-uboot.img` from edk2-webflash, or the SPI image of a Roxora
-   release once there is one).
+2. "What to write" defaults to "This release's SPI bootloader" when the
+   release has one (from 2026.11.1). For older releases choose "A file on
+   this computer" and a SPI image, for example `rock4d-spi-uboot.img` from
+   edk2-webflash.
 3. Review, Erase and write, confirm.
 
 Pass: "Written and verified"; after restart the board starts the bootloader

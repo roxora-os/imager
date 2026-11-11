@@ -23,6 +23,7 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     await page.waitForSelector('h2:has-text("Board")');
     await page.waitForTimeout(800);
     const shot = async (name) => {
+      await page.mouse.move(1, 1); // no hover highlight in the pictures
       await page.waitForTimeout(400);
       // The window is hidden, so Playwright cannot screenshot it; ask Electron.
       const b64 = await app.evaluate(async ({ BrowserWindow }) =>
@@ -30,7 +31,16 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
       writeFileSync(`${out}/${name}-${tag}-${theme}.png`, Buffer.from(b64, 'base64'));
     };
     await shot('1-board');
-    await page.click('text=Radxa ROCK 4D');
+    // A vendor selected: the menu on wide windows, the select on narrow ones.
+    if (w >= 768) await page.click('.vendor-pane .pf-v6-c-menu__item:has-text("Radxa")');
+    else await page.selectOption('.vendor-select select', 'Radxa');
+    await shot('1-board-vendor');
+    await page.fill('.board-search input', 'rock 4d');
+    await shot('1-board-search');
+    await page.fill('.board-search input', 'pinebook');
+    await shot('1-board-search-none');
+    await page.fill('.board-search input', 'rock4d');
+    await page.press('.board-search input', 'Enter');
     await page.click('.pf-v6-c-wizard__footer button:has-text("Next")');
     await shot('2-image');
     await page.click('.pf-v6-c-wizard__footer button:has-text("Next")');
@@ -42,6 +52,8 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     await page.click('.pf-v6-c-wizard__footer button:has-text("Back")');
     await page.click('label[for=method-maskrom]');
     await shot('3-destination-maskrom');
+    await page.locator('#src-spi').scrollIntoViewIfNeeded();
+    await shot('3-destination-maskrom-source');
     await app.close();
   }
 }
