@@ -114,6 +114,10 @@ describe('groupByBoard', () => {
     for (const i of c2.images) {
       i.file = i.file.replace('2026.11.0', '2026.12.1');
       i.url = `https://github.com/roxora-os/build/releases/download/v2026.12.1/${i.file}`;
+      if (i.spi) {
+        i.spi.file = i.spi.file.replace('2026.11.0', '2026.12.1');
+        i.spi.url = `https://github.com/roxora-os/build/releases/download/v2026.12.1/${i.spi.file}`;
+      }
     }
     const b = parseCatalog(c2).images;
     expect(parseCatalog(c2).problems).toEqual([]);
@@ -136,6 +140,8 @@ describe('GitHub releases', () => {
         digest: 'sha256:472e91ddb5b305155b1de916c8e5237643ac9c648b43d9f7062a3d1128cf82f2' },
       { name: 'roxora-armsom-cm5-io-noble-edge-2026.11.0.img.xz', browser_download_url: 'x',
         digest: 'sha256:0000000000000000000000000000000000000000000000000000000000000000' },
+      { name: 'roxora-radxa-rock-4d-noble-edge-2026.11.0-spi.img', browser_download_url: 'x',
+        digest: 'sha256:33831091f7cd2f9a070fcbff36243cbb4b6ae49f4c96a9607f214652e01f3561' },
     ],
   };
 
@@ -151,7 +157,16 @@ describe('GitHub releases', () => {
   it('drops images whose sha256 differs from the GitHub digest', () => {
     const p = checkAgainstRelease(parseCatalog(real()), gh);
     expect(p.images.map((i) => i.board)).toEqual(['radxa-rock-4d']);
+    expect(p.images[0].spi?.file).toBe('roxora-radxa-rock-4d-noble-edge-2026.11.0-spi.img');
     expect(p.problems[0]).toMatch(/differs from the digest/);
+  });
+
+  it('drops an SPI image whose digest differs, keeps the disk image', () => {
+    const assets = gh.assets.map((a) => (a.name.endsWith('-spi.img') ? { ...a, digest: 'sha256:' + '1'.repeat(64) } : a));
+    const p = checkAgainstRelease(parseCatalog(real()), { ...gh, assets });
+    expect(p.images[0].board).toBe('radxa-rock-4d');
+    expect(p.images[0].spi).toBeNull();
+    expect(p.problems.some((x) => /-spi.img: catalog sha256 differs/.test(x))).toBe(true);
   });
 
   it('drops images that are not attached to the release', () => {

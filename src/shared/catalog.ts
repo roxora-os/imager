@@ -21,11 +21,20 @@ export interface CatalogRelease {
   armbianRef: string;
 }
 
+export interface SpiImage {
+  file: string;
+  url: string;
+  size: number;
+  sha256: string;
+}
+
 export interface CatalogImage {
   /** Stable key: "<tag>/<file>". */
   id: string;
   board: string;
   boardName: string;
+  /** Board maker. Catalogs before 2026.11.1 have none: then the first word of boardName. */
+  vendor: string;
   soc: string;
   release: string;
   ubuntuVersion: string;
@@ -39,6 +48,8 @@ export interface CatalogImage {
   extractSha256: string;
   status: ImageStatus;
   verifyUrl: string;
+  /** The SPI bootloader image of the same build, for boards that boot from SPI NOR. */
+  spi: SpiImage | null;
   /** The release this image belongs to. */
   releaseInfo: CatalogRelease;
   /** True for entries from the sample catalog. These can never be written. */
@@ -126,6 +137,7 @@ function parseImage(raw: unknown, index: number, release: CatalogRelease, sample
   const status = str(raw, 'status', problems, where);
   const verifyUrl = typeof raw.verify_url === 'string' ? raw.verify_url : '';
   if (problems.length !== n) return null;
+  const vendor = typeof raw.vendor === 'string' && raw.vendor.trim() ? raw.vendor.trim() : vendorFallback(boardName!);
 
   const name = `${where} (${file})`;
   for (const [k, v] of [['board', board], ['release', rel], ['branch', branch], ['soc', soc]] as const) {
@@ -141,14 +153,47 @@ function parseImage(raw: unknown, index: number, release: CatalogRelease, sample
   if (url !== expectedUrl) problems.push(`${name}: url is not ${expectedUrl}`);
   if (extractSize! < size!) problems.push(`${name}: extract_size is smaller than size`);
   if (problems.length !== n) return null;
+  const spi = parseSpi(raw.spi, name, release, file!, problems);
 
   return {
     id: `${release.tag}/${file}`,
-    board: board!, boardName: boardName!, soc: soc!, release: rel!, ubuntuVersion: ubuntuVersion!,
+    board: board!, boardName: boardName!, vendor, soc: soc!, release: rel!, ubuntuVersion: ubuntuVersion!,
     branch: branch!, kernel, file: file!, url: url!, size: size!, sha256: sha256!,
     extractSize: extractSize!, extractSha256: extractSha256!, status: status as ImageStatus,
-    verifyUrl, releaseInfo: release, sample,
+    verifyUrl, spi, releaseInfo: release, sample,
   };
+}
+
+/** Vendor for catalogs that have no vendor field: the first word of the board name. */
+export function vendorFallback(boardName: string): string {
+  return boardName.trim().split(/\s+/)[0] || boardName;
+}
+
+/**
+ * The optional SPI image. A broken one is dropped (with a problem) and the
+ * disk image kept: the SD card path does not need it.
+ */
+function parseSpi(raw: unknown, name: string, release: CatalogRelease, imageFile: string, problems: string[]): SpiImage | null {
+  if (raw === undefined || raw === null) return null;
+  const where = `${name} spi`;
+  if (!isObject(raw)) {
+    problems.push(`${where}: not an object`);
+    return null;
+  }
+  const n = problems.length;
+  const file = str(raw, 'file', problems, where);
+  const url = str(raw, 'url', problems, where);
+  const size = int(raw, 'size', problems, where);
+  const sha256 = str(raw, 'sha256', problems, where);
+  if (problems.length !== n) return null;
+  const expectedFile = imageFile.replace(/\.img\.xz$/, '-spi.img');
+  if (file !== expectedFile) problems.push(`${where}: file name should be ${expectedFile}`);
+  const expectedUrl = `${DOWNLOAD_PREFIX}${release.tag}/${file}`;
+  if (url !== expectedUrl) problems.push(`${where}: url is not ${expectedUrl}`);
+  if (!HEX64.test(sha256!)) problems.push(`${where}: sha256 is not 64 lower-case hex digits`);
+  if (size! > 256 * 1024 * 1024) problems.push(`${where}: size is too large for SPI flash`);
+  if (problems.length !== n) return null;
+  return { file: file!, url: url!, size: size!, sha256: sha256! };
 }
 
 /**
@@ -191,6 +236,7 @@ export function parseCatalog(raw: unknown, opts: { sample?: boolean } = {}): Par
 export interface Board {
   board: string;
   boardName: string;
+  vendor: string;
   soc: string;
   /** Images for this board, newest release first. */
   images: CatalogImage[];
@@ -212,7 +258,7 @@ export function groupByBoard(images: CatalogImage[]): Board[] {
   for (const img of images) {
     let b = map.get(img.board);
     if (!b) {
-      b = { board: img.board, boardName: img.boardName, soc: img.soc, images: [] };
+      b = { board: img.board, boardName: img.boardName, vendor: img.vendor, soc: img.soc, images: [] };
       map.set(img.board, b);
     }
     b.images.push(img);
@@ -276,7 +322,19 @@ export function checkAgainstRelease(cat: ParsedCatalog, gh: GithubRelease): Pars
       problems.push(`${img.file}: catalog sha256 differs from the digest GitHub publishes`);
       continue;
     }
-    images.push({ ...img, releaseInfo: release });
+    let spi = img.spi;
+    if (spi) {
+      const sa = gh.assets.find((a) => a.name === spi!.file);
+      const sd = sa?.digest ?? '';
+      if (!sa) {
+        problems.push(`${spi.file}: not attached to release ${gh.tag_name}`);
+        spi = null;
+      } else if (sd.startsWith('sha256:') && sd.slice(7) !== spi.sha256) {
+        problems.push(`${spi.file}: catalog sha256 differs from the digest GitHub publishes`);
+        spi = null;
+      }
+    }
+    images.push({ ...img, spi, releaseInfo: release });
   }
   return { ...cat, release, images, problems };
 }
