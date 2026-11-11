@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.roxora_os.imager</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-only</project_license>
+  <name>Roxora Imager</name>
+  <summary>Write Roxora images to SD cards, USB drives and board storage</summary>
+  <developer id="io.github.roxora_os">
+    <name>Roxora Project</name>
+  </developer>
+  <description>
+    <p>Roxora Imager writes Roxora images, Ubuntu with Armbian kernels for
+      single-board computers, to SD cards and USB drives, and to a board's
+      eMMC or SPI NOR flash over USB in Maskrom mode.</p>
+    <p>It downloads images from the Roxora releases on GitHub, checks them
+      against the release checksums, and reads every write back to compare
+      it with the release.</p>
+  </description>
+  <launchable type="desktop-id">io.github.roxora_os.imager.desktop</launchable>
+  <url type="homepage">https://github.com/roxora-os/imager</url>
+  <url type="bugtracker">https://github.com/roxora-os/imager/issues</url>
+  <content_rating type="oars-1.1"/>
+</component>

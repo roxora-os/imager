@@ -1,0 +1,280 @@
+name: Release
+
+# Packages for Windows (x64), macOS (arm64 and x86_64) and Linux (AppImage,
+# .deb and .rpm for x86_64 and arm64), attached to a GitHub release on a
+# version tag. The layout follows gahingwoo/RKDevelopTool-GUI's release.yml:
+# unsigned unless signing secrets exist, the scarce Intel macOS runner never
+# blocks the release, and the notes come from CHANGELOG.md.
+on:
+  push:
+    tags: ["v[0-9]*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  wasm:
+    uses: ./.github/workflows/wasm.yml
+
+  version:
+    name: Tag matches package.json
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      # The in-app update check compares the latest tag with the app's
+      # version, so they must agree.
+      - run: |
+          v=$(node -p "require('./package.json').version")
+          [ "$v" = "${GITHUB_REF_NAME#v}" ] || { echo "tag $GITHUB_REF_NAME does not match package.json $v"; exit 1; }
+
+  linux:
+    name: Linux ${{ matrix.arch }}
+    needs: wasm
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-22.04, eb: x64, pkg_arch: amd64, nfpm_arch: x86_64, unpacked: linux-unpacked }
+          - { arch: arm64, runner: ubuntu-22.04-arm, eb: arm64, pkg_arch: arm64, nfpm_arch: arm64, unpacked: linux-arm64-unpacked }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run rebuild-native
+      - uses: actions/download-artifact@v4
+        with:
+          name: rkdeveloptool-wasm
+          path: vendor/rkdeveloptool-wasm
+      - run: npm run build
+        env:
+          NODE_ENV: production
+      - run: npm run icons
+      - name: Electron app and AppImage
+        run: npx electron-builder --linux dir AppImage --${{ matrix.eb }}
+      - name: Name the AppImage
+        run: |
+          V=$(node -p "require('./package.json').version")
+          f=$(ls dist/*.AppImage)
+          mv "$f" "dist/roxora-imager-$V-linux-${{ matrix.arch }}.AppImage"
+      - name: Install nfpm
+        run: |
+          curl -fsSL -o /tmp/nfpm.tar.gz \
+            "https://github.com/goreleaser/nfpm/releases/download/v2.41.0/nfpm_2.41.0_Linux_${{ matrix.nfpm_arch }}.tar.gz"
+          sudo tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
+      - name: Check the AppStream metadata
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y appstream desktop-file-utils xvfb
+          appstreamcli validate --no-net packaging/io.github.roxora_os.imager.metainfo.xml
+          desktop-file-validate packaging/io.github.roxora_os.imager.desktop
+      - name: Package deb and rpm
+        env:
+          PKG_ARCH: ${{ matrix.pkg_arch }}
+          APP_DIR: ./dist/${{ matrix.unpacked }}
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          export VERSION
+          nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+          nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
+          ls -l dist/
+      # A healthy app keeps running until timeout kills it (124). Anything
+      # else means it exited on its own and never opened its window.
+      - name: Smoke-test the AppImage on this runner
+        run: |
+          set +e
+          APPIMAGE_EXTRACT_AND_RUN=1 timeout 40 xvfb-run -a dist/*.AppImage > /tmp/appimage.log 2>&1
+          rc=$?
+          cat /tmp/appimage.log
+          [ "$rc" = 124 ] || { echo "FAIL: AppImage exited with $rc"; exit 1; }
+      - name: Smoke-test the .deb on this runner
+        run: |
+          sudo apt-get install -y ./dist/*.deb
+          test -u /opt/roxora-imager/chrome-sandbox
+          test -f /usr/lib/udev/rules.d/70-roxora-imager.rules
+          set +e
+          timeout 30 xvfb-run -a roxora-imager > /tmp/deb.log 2>&1
+          rc=$?
+          cat /tmp/deb.log
+          [ "$rc" = 124 ] || { echo "FAIL: installed app exited with $rc"; exit 1; }
+      - name: Smoke-test the AppImage on a bare system
+        if: matrix.arch == 'x86_64'
+        run: |
+          docker run --rm -v "$PWD/dist:/dist:ro" debian:bookworm-slim bash -euo pipefail -c '
+            apt-get update -qq
+            # Only what an Electron app may expect from the host.
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+              xvfb xauth libgtk-3-0 libnss3 libasound2 libgbm1 libxss1 libxtst6 > /dev/null
+            cp /dist/*.AppImage /tmp/app.AppImage
+            chmod +x /tmp/app.AppImage
+            set +e
+            APPIMAGE_EXTRACT_AND_RUN=1 timeout 40 xvfb-run -a /tmp/app.AppImage --no-sandbox > /tmp/app.log 2>&1
+            rc=$?
+            set -e
+            cat /tmp/app.log
+            if grep -q "cannot open shared object file" /tmp/app.log; then echo "FAIL: missing library"; exit 1; fi
+            [ "$rc" = 124 ] || { echo "FAIL: exited with $rc"; exit 1; }
+            echo "OK: app stayed running"
+          '
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-${{ matrix.arch }}
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+            dist/*.rpm
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    needs: wasm
+    runs-on: ${{ matrix.runner }}
+    # Intel runners are scarce and retire around August 2027; never let
+    # that build block the release.
+    continue-on-error: ${{ matrix.arch == 'x86_64' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: arm64, runner: macos-15, eb: arm64, out: mac-arm64 }
+          - { arch: x86_64, runner: macos-15-intel, eb: x64, out: mac }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run rebuild-native
+      - uses: actions/download-artifact@v4
+        with:
+          name: rkdeveloptool-wasm
+          path: vendor/rkdeveloptool-wasm
+      - run: npm run build
+        env:
+          NODE_ENV: production
+      - run: npm run icons
+      - run: brew install create-dmg
+      - name: Electron app
+        run: npx electron-builder --mac dir --${{ matrix.eb }}
+      # Developer ID + hardened runtime when the signing secrets are set,
+      # ad hoc otherwise.
+      - name: Sign the app
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: bash packaging/macos-sign.sh app "dist/${{ matrix.out }}/Roxora Imager.app"
+      - name: Confirm the architecture
+        run: file "dist/${{ matrix.out }}/Roxora Imager.app/Contents/MacOS/Roxora Imager"
+      - name: Create the DMG
+        run: |
+          V=$(node -p "require('./package.json').version")
+          bash packaging/make-dmg.sh "dist/${{ matrix.out }}/Roxora Imager.app" "dist/roxora-imager-$V-macos-${{ matrix.arch }}.dmg"
+      - name: Notarize the DMG
+        env:
+          MACOS_CERTIFICATE_P12: ${{ secrets.MACOS_CERTIFICATE_P12 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: bash packaging/macos-sign.sh dmg dist/*.dmg
+      - name: Smoke-test the app
+        run: |
+          set +e
+          # macOS has no timeout(1); SIGALRM after 30 s gives 142.
+          perl -e 'alarm 30; exec @ARGV' "dist/${{ matrix.out }}/Roxora Imager.app/Contents/MacOS/Roxora Imager" > /tmp/app.log 2>&1
+          rc=$?
+          cat /tmp/app.log
+          [ "$rc" = 142 ] || { echo "FAIL: exited with $rc"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/*.dmg
+      # Append the Intel DMG once the release exists rather than racing the
+      # publish job for it (as RKDevelopTool-GUI does).
+      - name: Attach the Intel DMG to the release
+        if: matrix.arch == 'x86_64' && startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 60); do
+            gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
+            sleep 30
+          done
+          gh release upload "$GITHUB_REF_NAME" dist/*.dmg --repo "$GITHUB_REPOSITORY" --clobber
+
+  windows:
+    name: Windows x64
+    needs: wasm
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run rebuild-native
+      - uses: actions/download-artifact@v4
+        with:
+          name: rkdeveloptool-wasm
+          path: vendor/rkdeveloptool-wasm
+      - run: npm run build
+        env:
+          NODE_ENV: production
+      - run: npm run icons
+      # Unsigned: SmartScreen will warn. See docs/install.md.
+      - name: Installer and zip
+        run: npx electron-builder --win nsis zip --x64
+      - name: Name the zip
+        run: |
+          V=$(node -p "require('./package.json').version")
+          mv dist/roxora-imager-$V-win-x64.zip dist/roxora-imager-$V-windows-x64.zip
+          ls -l dist
+      - name: Smoke-test the app
+        run: |
+          set +e
+          timeout 30 "dist/win-unpacked/roxora-imager.exe" > app.log 2>&1
+          rc=$?
+          cat app.log
+          [ "$rc" = 124 ] || { echo "FAIL: exited with $rc"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-x64
+          path: |
+            dist/*-setup.exe
+            dist/*-windows-x64.zip
+
+  release:
+    name: Publish the release
+    needs: [version, linux, macos, windows]
+    if: startsWith(github.ref, 'refs/tags/') && !cancelled() && needs.version.result == 'success' && needs.linux.result == 'success' && needs.macos.result == 'success' && needs.windows.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # The notes are the tag's section of CHANGELOG.md; the script fails
+      # when there is none, so a release never goes out with blank notes.
+      - run: sh packaging/release-notes.sh "${GITHUB_REF_NAME#v}" > release-notes.md
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Checksums
+        run: |
+          mkdir out
+          find artifacts -path artifacts/rkdeveloptool-wasm -prune -o -type f -exec cp {} out/ \;
+          (cd out && sha256sum -- * > SHA256SUMS)
+          cat out/SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: out/*
+          body_path: release-notes.md

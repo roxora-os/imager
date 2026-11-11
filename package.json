@@ -13,10 +13,14 @@
     "start": "npm run build && electron .",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "rebuild-native": "electron-rebuild -f -o mountutils"
+    "rebuild-native": "electron-rebuild -f -o mountutils",
+    "icons": "node scripts/icons.mjs",
+    "e2e:maskrom": "node scripts/electron-maskrom-e2e.mjs",
+    "shots": "node scripts/shots.mjs dev/shots"
   },
   "dependencies": {
     "@balena/sudo-prompt": "9.2.1-workaround-windows-amperstand-in-username-0849e215b947987a643fe5763902aea201255534",
+    "drivelist": "12.0.2",
     "etcher-sdk": "10.2.20"
   },
   "devDependencies": {
@@ -26,6 +30,7 @@
     "@patternfly/react-core": "6.7.0",
     "@patternfly/react-icons": "6.7.0",
     "@patternfly/react-table": "6.7.0",
+    "@resvg/resvg-js": "2.6.2",
     "@types/node": "22.19.1",
     "@types/react": "19.2.2",
     "@types/react-dom": "19.2.2",
@@ -37,5 +42,55 @@
     "react-dom": "19.2.0",
     "typescript": "5.9.3",
     "vitest": "4.0.8"
+  },
+  "build": {
+    "appId": "io.github.roxora-os.imager",
+    "productName": "Roxora Imager",
+    "executableName": "roxora-imager",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build-res"
+    },
+    "files": [
+      "build/**/*",
+      "!build/**/*.map",
+      "resources/**/*",
+      "package.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "npmRebuild": false,
+    "icon": "build-res/icon.png",
+    "artifactName": "roxora-imager-${version}-${os}-${arch}.${ext}",
+    "linux": {
+      "target": [
+        "dir",
+        "AppImage"
+      ],
+      "category": "System"
+    },
+    "mac": {
+      "target": [
+        "dir"
+      ],
+      "category": "public.app-category.utilities",
+      "identity": null,
+      "hardenedRuntime": false
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "roxora-imager-${version}-windows-${arch}-setup.${ext}"
+    },
+    "publish": null
   }
 }

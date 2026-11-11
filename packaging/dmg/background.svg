@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="660" height="500" viewBox="0 0 660 500">
+  <rect width="660" height="500" fill="#f5f6f8"/>
+  <text x="330" y="44" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="18" font-weight="bold" fill="#2b2f36">Drag Roxora Imager to Applications to install</text>
+  <line x1="255" y1="170" x2="395" y2="170" stroke="#9aa3ad" stroke-width="4" stroke-linecap="round"/>
+  <polygon points="405,170 389,160 389,180" fill="#9aa3ad"/>
+  <line x1="40" y1="262" x2="620" y2="262" stroke="#d9dde2" stroke-width="1"/>
+  <text x="330" y="290" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="13" font-weight="bold" fill="#2b2f36">macOS says it cannot be opened?</text>
+  <text x="330" y="314" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#5f6670">macOS 15 and later: System Settings, Privacy and Security, Open Anyway.</text>
+  <text x="330" y="332" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#5f6670">macOS 14 and earlier: right-click the app, Open.</text>
+  <text x="330" y="362" text-anchor="middle" font-family="Helvetica, Arial, sans-serif" font-size="12" fill="#5f6670">Details in the note below.</text>
+</svg>

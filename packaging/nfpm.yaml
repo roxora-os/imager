@@ -1,0 +1,72 @@
+# nfpm config for the .deb and .rpm, as in RKDevelopTool-GUI.
+#   VERSION=0.1.0 PKG_ARCH=amd64 nfpm package -f packaging/nfpm.yaml -p deb -t dist/
+# PKG_ARCH is amd64 or arm64; APP_DIR is electron-builder's unpacked app
+# (dist/linux-unpacked or dist/linux-arm64-unpacked).
+name: roxora-imager
+arch: ${PKG_ARCH}
+platform: linux
+version: ${VERSION}
+maintainer: Roxora Project <oss@gahingwoo.com>
+description: |
+  Write Roxora images to SD cards and USB drives, and to board storage
+  (eMMC, SPI NOR) over USB in Maskrom mode. Downloads come from the
+  Roxora releases and every write is read back and checked.
+homepage: https://github.com/roxora-os/imager
+license: GPL-2.0-only
+section: utils
+priority: optional
+
+# What Electron needs from the system (the same list electron-builder uses).
+depends:
+  - libgtk-3-0 | gtk3
+  - libnotify4 | libnotify
+  - libnss3 | nss
+  - libxss1 | libXScrnSaver
+  - libxtst6 | libXtst
+  - xdg-utils
+  - libatspi2.0-0 | at-spi2-core
+  - libuuid1 | libuuid
+  - libsecret-1-0 | libsecret
+  - pkexec | polkit
+overrides:
+  rpm:
+    depends:
+      - gtk3
+      - libnotify
+      - nss
+      - libXScrnSaver
+      - libXtst
+      - xdg-utils
+      - at-spi2-core
+      - libuuid
+      - libsecret
+      - polkit
+
+contents:
+  - src: ${APP_DIR}/
+    dst: /opt/roxora-imager/
+    type: tree
+  - src: ./packaging/launcher.sh
+    dst: /usr/bin/roxora-imager
+    file_info:
+      mode: 0755
+  - src: ./packaging/io.github.roxora_os.imager.desktop
+    dst: /usr/share/applications/io.github.roxora_os.imager.desktop
+  - src: ./packaging/io.github.roxora_os.imager.metainfo.xml
+    dst: /usr/share/metainfo/io.github.roxora_os.imager.metainfo.xml
+  - src: ./build-res/hicolor/
+    dst: /usr/share/icons/hicolor/
+    type: tree
+  # USB access for the desktop user, so Maskrom writing needs no sudo.
+  - src: ./packaging/70-roxora-imager.rules
+    dst: /usr/lib/udev/rules.d/70-roxora-imager.rules
+  - src: ./packaging/udev-reload.sh
+    dst: /usr/share/roxora-imager/udev-reload.sh
+    file_info:
+      mode: 0755
+  - src: ./LICENSE
+    dst: /usr/share/doc/roxora-imager/LICENSE
+
+scripts:
+  postinstall: ./packaging/postinstall.sh
+  postremove: ./packaging/udev-reload.sh

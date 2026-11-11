@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Roxora Imager
+Comment=Write Roxora images to SD cards, USB drives and board storage
+Exec=roxora-imager %U
+Icon=roxora-imager
+Categories=System;Utility;
+Keywords=SD card;image;flash;maskrom;eMMC;
+Terminal=false
+StartupWMClass=Roxora Imager
