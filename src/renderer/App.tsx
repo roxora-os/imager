@@ -186,7 +186,7 @@ function DestinationStep(p: {
       </div>
 
       {p.method === 'sd' && (
-        <Card isPlain className="dest-card">
+        <Card className="dest-card">
           <CardHeader actions={{ actions: <Button variant="secondary" onClick={p.refreshDrives}>Refresh</Button>, hasNoOffset: true }}>
             <CardTitle>Drives</CardTitle>
           </CardHeader>
@@ -223,7 +223,7 @@ function DestinationStep(p: {
 
       {p.method === 'maskrom' && mb && (
         <>
-          <Card isPlain className="dest-card">
+          <Card className="dest-card">
             <CardTitle>Storage</CardTitle>
             <CardBody>
               {mb.storages.map((s) => (
@@ -232,7 +232,7 @@ function DestinationStep(p: {
               ))}
             </CardBody>
           </Card>
-          <Card isPlain className="dest-card">
+          <Card className="dest-card">
             <CardTitle>What to write</CardTitle>
             <CardBody>
               <Radio id="src-release" name="source" isChecked={p.source === 'release'} onChange={() => p.setSource('release')}
@@ -250,7 +250,7 @@ function DestinationStep(p: {
               {p.fileError && <Alert variant="danger" isInline isPlain title={p.fileError} />}
             </CardBody>
           </Card>
-          <Card isPlain className="dest-card">
+          <Card className="dest-card">
             <CardTitle>Connect the board in Maskrom mode</CardTitle>
             <CardBody>
               <Content component="ol">

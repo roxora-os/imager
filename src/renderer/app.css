@@ -13,7 +13,7 @@ html, body, #root { height: 100%; }
 .muted { color: var(--pf-t--global--text--color--subtle); font-size: var(--pf-t--global--font--size--sm); }
 
 .method { display: grid; gap: var(--pf-t--global--spacer--md); margin: var(--pf-t--global--spacer--md) 0 var(--pf-t--global--spacer--lg); }
-.dest-card { margin-bottom: var(--pf-t--global--spacer--md); border: var(--pf-t--global--border--width--regular) solid var(--pf-t--global--border--color--default); border-radius: var(--pf-t--global--border--radius--medium); }
+.dest-card { margin-bottom: var(--pf-t--global--spacer--md); }
 .dest-card .pf-v6-c-radio + .pf-v6-c-radio { margin-top: var(--pf-t--global--spacer--sm); }
 .file-row { display: flex; align-items: center; gap: var(--pf-t--global--spacer--md); margin: var(--pf-t--global--spacer--sm) 0 0 var(--pf-t--global--spacer--lg); }
 .hidden-drives { margin-top: var(--pf-t--global--spacer--md); }
@@ -21,7 +21,7 @@ html, body, #root { height: 100%; }
 .dest-card .pf-v6-c-code-block { margin-top: var(--pf-t--global--spacer--sm); }
 
 .review { max-width: 52rem; }
-.footer-note { align-self: center; color: var(--pf-t--global--text--color--subtle); }
+.footer-note { align-self: center; margin-left: var(--pf-t--global--spacer--sm); color: var(--pf-t--global--text--color--subtle); }
 
 .notice { padding-bottom: 0; }
 .run .pf-v6-c-card { max-width: 52rem; }
