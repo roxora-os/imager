@@ -56,6 +56,11 @@ jobs:
         env:
           NODE_ENV: production
       - run: npm run icons
+      # lzma-native 8.0.6 ships x86-64 files as its linux-arm64 prebuilds:
+      # keep only this target's prebuilds and replace wrong-CPU ones by a
+      # build from source.
+      - name: Native addons for this CPU
+        run: node scripts/native-for-target.mjs ${{ matrix.eb }}
       - name: Electron app and AppImage
         run: npx electron-builder --linux dir AppImage --${{ matrix.eb }} --publish never
       - name: Name the AppImage
@@ -96,13 +101,15 @@ jobs:
           ls -l dist/
       - name: What the packages carry (icons, desktop entry, metainfo; no firmware blobs)
         run: |
-          node scripts/check-package.mjs dist/app
+          node scripts/check-package.mjs dist/app ${{ matrix.eb }}
           dpkg-deb -c dist/*.deb | grep -E 'share/(icons|applications|metainfo)/' | awk '{print $NF}'
           if dpkg-deb -c dist/*.deb | grep -iE 'spl_loader|usbplug|rkbin|usbboot'; then echo "FAIL: firmware blobs in the .deb"; exit 1; fi
           APPIMAGE_EXTRACT_AND_RUN=1 ./dist/*.AppImage --appimage-extract > /dev/null
-          node scripts/check-package.mjs squashfs-root
+          node scripts/check-package.mjs squashfs-root ${{ matrix.eb }}
           ls squashfs-root/*.desktop squashfs-root/usr/share/icons/hicolor/*/apps/ 2>/dev/null || true
           rm -rf squashfs-root
+      - name: Decompress a .img.xz in the packaged app
+        run: ELECTRON_RUN_AS_NODE=1 dist/app/roxora-imager scripts/check-decompress.cjs "$PWD/dist/app/resources/app.asar"
       # A healthy app keeps running until timeout kills it (124). Anything
       # else means it exited on its own and never opened its window.
       - name: Smoke-test the AppImage on this runner
@@ -156,6 +163,22 @@ jobs:
             dist/*.deb
             dist/*.rpm
 
+  linux-arm64-noble:
+    name: Linux arm64 AppImage on Ubuntu 24.04
+    needs: linux
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-arm64
+          path: dist
+      - name: Decompress a .img.xz in the packaged app
+        run: |
+          chmod +x dist/*.AppImage
+          (cd dist && ./*.AppImage --appimage-extract > /dev/null)
+          ELECTRON_RUN_AS_NODE=1 dist/squashfs-root/roxora-imager scripts/check-decompress.cjs "$PWD/dist/squashfs-root/resources/app.asar"
+
   macos:
     name: macOS ${{ matrix.arch }}
     needs: wasm
@@ -187,6 +210,8 @@ jobs:
           NODE_ENV: production
       - run: npm run icons
       - run: brew install create-dmg
+      - name: Native addons for this CPU
+        run: node scripts/native-for-target.mjs ${{ matrix.eb }}
       - name: Electron app
         run: |
           npx electron-builder --mac dir --${{ matrix.eb }} --publish never
@@ -207,7 +232,7 @@ jobs:
         run: file "dist/${{ matrix.out }}/Roxora Imager.app/Contents/MacOS/"*
       - name: Icon and no firmware blobs in the app
         run: |
-          node scripts/check-package.mjs "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Resources"
+          node scripts/check-package.mjs "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Resources" ${{ matrix.eb }}
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Info.plist"
           cmp build-res/icon.icns "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Resources/$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Info.plist")"
           echo "OK: the bundle's icon is the design .icns"
@@ -300,8 +325,8 @@ jobs:
 
   release:
     name: Publish the release
-    needs: [version, linux, macos, windows]
-    if: startsWith(github.ref, 'refs/tags/') && !cancelled() && needs.version.result == 'success' && needs.linux.result == 'success' && needs.macos.result == 'success' && needs.windows.result == 'success'
+    needs: [version, linux, linux-arm64-noble, macos, windows]
+    if: startsWith(github.ref, 'refs/tags/') && !cancelled() && needs.version.result == 'success' && needs.linux.result == 'success' && needs.linux-arm64-noble.result == 'success' && needs.macos.result == 'success' && needs.windows.result == 'success'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
