@@ -262,19 +262,6 @@ jobs:
         with:
           name: macos-${{ matrix.arch }}
           path: dist/*.dmg
-      # Append the Intel DMG once the release exists rather than racing the
-      # publish job for it (as RKDevelopTool-GUI does).
-      - name: Attach the Intel DMG to the release
-        if: matrix.arch == 'x86_64' && startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          for i in $(seq 1 60); do
-            gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 && break
-            sleep 30
-          done
-          gh release upload "$GITHUB_REF_NAME" dist/*.dmg --repo "$GITHUB_REPOSITORY" --clobber
-
   windows:
     name: Windows x64
     needs: wasm
