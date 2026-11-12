@@ -1,6 +1,6 @@
 // Lay out the app icon for the packagers. The icon files in resources/icons/
 // are roxora-os/design's icons/imager/ copied unchanged, from design commit
-// 8ea4c3ec558cd1cdca21ba889e151498d4ef8c9e ("Add imager icon PNG sizes");
+// 8433eddd00b04aa2118cee4c535eaf41f72f2d37 ("Add imager icon PNG sizes");
 // nothing is rendered or recoloured here. Writes build-res/ (not committed):
 //   icon.icns, icon.ico, icon.png        electron-builder (macOS, Windows, Linux)
 //   linux-icons/<n>x<n>.png              electron-builder's AppImage icon set
