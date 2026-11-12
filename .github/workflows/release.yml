@@ -342,7 +342,12 @@ jobs:
           find artifacts -path artifacts/rkdeveloptool-wasm -prune -o -type f -exec cp {} out/ \;
           (cd out && sha256sum -- * > SHA256SUMS)
           cat out/SHA256SUMS
+      # A pre-release until it has passed the hardware test (part C of
+      # roxora-os/build docs/hardware-test.md); then marked as a release by
+      # hand. The update check reads releases/latest, which skips
+      # pre-releases, so nobody is offered one as an update.
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*
           body_path: release-notes.md
+          prerelease: true
