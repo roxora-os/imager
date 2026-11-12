@@ -69,6 +69,14 @@ jobs:
           curl -fsSL -o /tmp/nfpm.tar.gz \
             "https://github.com/goreleaser/nfpm/releases/download/v2.41.0/nfpm_2.41.0_Linux_${{ matrix.nfpm_arch }}.tar.gz"
           sudo tar -xzf /tmp/nfpm.tar.gz -C /usr/local/bin nfpm
+      # The metainfo's release entry is the version being built and its date:
+      # the tag's version and the tagged commit's date, or package.json's
+      # version and the commit's date when run by hand.
+      - name: Set the metainfo release entry
+        run: |
+          V=$(node -p "require('./package.json').version")
+          case "$GITHUB_REF" in refs/tags/v*) V="${GITHUB_REF_NAME#v}" ;; esac
+          node scripts/metainfo-release.mjs "$V" "$(git log -1 --format=%cs)"
       - name: Check the AppStream metadata
         run: |
           sudo apt-get update
@@ -86,11 +94,11 @@ jobs:
           nfpm package -f packaging/nfpm.yaml -p deb -t dist/
           nfpm package -f packaging/nfpm.yaml -p rpm -t dist/
           ls -l dist/
-      - name: What the packages carry (icons, desktop entry, metainfo; no Rockchip loader)
+      - name: What the packages carry (icons, desktop entry, metainfo; no firmware blobs)
         run: |
           node scripts/check-package.mjs dist/app
           dpkg-deb -c dist/*.deb | grep -E 'share/(icons|applications|metainfo)/' | awk '{print $NF}'
-          if dpkg-deb -c dist/*.deb | grep -iE 'spl_loader|usbplug|rkbin'; then echo "FAIL: Rockchip loader in the .deb"; exit 1; fi
+          if dpkg-deb -c dist/*.deb | grep -iE 'spl_loader|usbplug|rkbin|usbboot'; then echo "FAIL: firmware blobs in the .deb"; exit 1; fi
           APPIMAGE_EXTRACT_AND_RUN=1 ./dist/*.AppImage --appimage-extract > /dev/null
           node scripts/check-package.mjs squashfs-root
           ls squashfs-root/*.desktop squashfs-root/usr/share/icons/hicolor/*/apps/ 2>/dev/null || true
@@ -197,7 +205,7 @@ jobs:
         run: bash packaging/macos-sign.sh app "dist/${{ matrix.out }}/Roxora Imager.app"
       - name: Confirm the architecture
         run: file "dist/${{ matrix.out }}/Roxora Imager.app/Contents/MacOS/"*
-      - name: Icon and no Rockchip loader in the app
+      - name: Icon and no firmware blobs in the app
         run: |
           node scripts/check-package.mjs "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Resources"
           /usr/libexec/PlistBuddy -c 'Print :CFBundleIconFile' "dist/${{ matrix.out }}/Roxora Imager.app/Contents/Info.plist"
@@ -269,7 +277,7 @@ jobs:
       # Unsigned: SmartScreen will warn. See docs/install.md.
       - name: Installer and zip
         run: npx electron-builder --win nsis zip --x64 --publish never
-      - name: Icon and no Rockchip loader in the app
+      - name: Icon and no firmware blobs in the app
         run: node scripts/check-package.mjs dist/win-unpacked
       - name: Name the zip
         run: |
