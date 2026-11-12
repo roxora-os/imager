@@ -51,7 +51,16 @@ curl -fsSL https://raw.githubusercontent.com/roxora-os/imager/main/install.sh | 
 ```
 
 What each system asks on first start, and the drivers for Maskrom writing:
-[docs/install.md](docs/install.md).
+[docs/install.md](docs/install.md). The website lists the packages of the
+newest release: https://roxora-os.github.io/roxora-imager/
+
+## Code signing policy
+
+The Windows packages are not signed yet. They are to be signed under the
+[code signing policy](https://roxora-os.github.io/code-signing/), which
+names who may approve a signature and what is signed. What the app fetches,
+and from where, is in the
+[privacy policy](https://roxora-os.github.io/privacy/).
 
 ## How it works
 
