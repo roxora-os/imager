@@ -14,7 +14,11 @@
 import { createHash } from 'node:crypto';
 import { connect, type Socket } from 'node:net';
 import * as drivelist from 'drivelist';
-import { multiWrite, sourceDestination } from 'etcher-sdk';
+// Only the parts the writer uses: etcher-sdk's index also loads its device
+// scanner, which pulls in the Raspberry Pi and BeagleBone USB boot modules
+// and their firmware blobs. Those are not shipped (scripts/build-writer.mjs).
+import * as multiWrite from 'etcher-sdk/build/multi-write';
+import * as sourceDestination from 'etcher-sdk/build/source-destination';
 import { isOfferedTarget, type DriveInfo } from '../shared/targets';
 
 export interface HelperArgs {

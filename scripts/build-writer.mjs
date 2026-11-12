@@ -14,13 +14,30 @@ const target = process.argv[2] ?? `node22-${plat}-${process.arch}`;
 const exe = target.includes('-win-') ? '.exe' : '';
 
 // Packages with native addons stay outside the bundle; pkg ships them as assets.
-// ext2fs and winusb-driver-generator are only loaded for features the writer
-// does not use (configuring images, Windows driverless USB boot).
+// These are only loaded for features the writer does not use, so they stay
+// out of it: ext2fs (configuring images), winusb-driver-generator (Windows
+// driverless USB boot), and the Raspberry Pi and BeagleBone USB boot modules
+// with their firmware blobs (etcher-sdk's device scanner; the helper imports
+// only multi-write and source-destination, and etcher-sdk loads
+// node-raspberrypi-usbboot lazily, catching its absence).
 const unused = ['ext2fs', 'winusb-driver-generator'];
-const native = ['drivelist', 'mountutils', 'lzma-native', 'xxhash-addon', '@ronomon/direct-io', 'usb', 'node-raspberrypi-usbboot', '@balena/node-beaglebone-usbboot'];
+const native = ['drivelist', 'mountutils', 'lzma-native', 'xxhash-addon', '@ronomon/direct-io'];
+// A plain external require would still make pkg pack the module and its
+// blobs, so the USB boot modules are replaced by a stub that throws.
+const stubbed = ['usb', 'node-raspberrypi-usbboot', '@balena/node-beaglebone-usbboot'];
+const stub = {
+  name: 'stub-usbboot',
+  setup(b) {
+    const filter = new RegExp(`^(${stubbed.map((m) => m.replace(/[/.]/g, '\\$&')).join('|')})$`);
+    b.onResolve({ filter }, (a) => ({ path: a.path, namespace: 'stub' }));
+    b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({
+      contents: `throw new Error(${JSON.stringify(`${a.path} is not included in the Roxora Imager writer`)});`, loader: 'js',
+    }));
+  },
+};
 await build({
   entryPoints: ['src/helper/write-helper.ts'], bundle: true, platform: 'node', target: 'node22', format: 'cjs',
-  external: [...native, ...unused], outfile: 'build/writer/writer.js', logLevel: 'warning',
+  external: [...native, ...unused], plugins: [stub], outfile: 'build/writer/writer.js', logLevel: 'warning',
 });
 rmSync('build-res/writer', { recursive: true, force: true });
 mkdirSync('build-res/writer', { recursive: true });

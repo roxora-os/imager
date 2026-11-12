@@ -60,6 +60,9 @@
       "resources/**/*",
       "!resources/icons/*.ico",
       "!resources/icons/*.icns",
+      "!**/node_modules/node-raspberrypi-usbboot{,/**/*}",
+      "!**/node_modules/@balena/node-beaglebone-usbboot{,/**/*}",
+      "!**/node_modules/usb{,/**/*}",
       "package.json"
     ],
     "asar": true,
