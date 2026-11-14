@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  catalogAssets, checkAgainstRelease, groupByBoard, parseCatalog, type GithubRelease,
+  catalogAssets, checkAgainstRelease, groupByBoard, isLts, parseCatalog, type GithubRelease,
 } from '../src/shared/catalog';
 
 const sample = JSON.parse(readFileSync(new URL('../resources/sample-catalog.json', import.meta.url), 'utf8'));
@@ -124,6 +124,20 @@ describe('groupByBoard', () => {
     const boards = groupByBoard([...a, ...b]);
     expect(boards.map((x) => x.boardName)).toEqual(['ArmSoM CM5-IO', 'Radxa ROCK 4D']);
     expect(boards[0].images.map((i) => i.releaseInfo.version)).toEqual(['2026.12.1', '2026.11.0']);
+  });
+
+  it('puts the newest Ubuntu LTS first within a release, then newer Ubuntu', () => {
+    const base = parseCatalog(real()).images.find((i) => i.board === 'radxa-rock-4d')!;
+    const mk = (release: string, ubuntuVersion: string, branch = 'edge') =>
+      ({ ...base, id: `${release}-${branch}`, release, ubuntuVersion, branch });
+    const boards = groupByBoard([mk('noble', '24.04'), mk('stonking', '26.10'),
+      mk('resolute', '26.04', 'vendor'), mk('resolute', '26.04')]);
+    expect(boards[0].images.map((i) => i.id)).toEqual(
+      ['resolute-edge', 'resolute-vendor', 'noble-edge', 'stonking-edge']);
+  });
+
+  it('knows which Ubuntu versions are LTS', () => {
+    expect(['24.04', '26.04', '26.10', '25.04', '28.04.1'].map(isLts)).toEqual([true, true, false, false, true]);
   });
 
   it('returns nothing for no images', () => {

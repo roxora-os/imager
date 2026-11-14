@@ -252,7 +252,22 @@ function compareVersions(a: string, b: string): number {
   return 0;
 }
 
-/** Group images by board; boards sorted by name, images newest first. */
+/** Ubuntu LTS releases are April releases of even years (24.04, 26.04). */
+export function isLts(ubuntuVersion: string): boolean {
+  const m = /^(\d+)\.(\d+)/.exec(ubuntuVersion);
+  return !!m && m[2] === '04' && Number(m[1]) % 2 === 0;
+}
+
+const ubuntuNumber = (v: string) => {
+  const m = /^(\d+)\.(\d+)/.exec(v);
+  return m ? Number(m[1]) * 100 + Number(m[2]) : 0;
+};
+
+/**
+ * Group images by board; boards sorted by name. Within a board: newest Roxora
+ * release first, then the newest Ubuntu LTS (the default a user gets), then
+ * newer Ubuntu before older, then the edge kernel before others.
+ */
 export function groupByBoard(images: CatalogImage[]): Board[] {
   const map = new Map<string, Board>();
   for (const img of images) {
@@ -265,6 +280,9 @@ export function groupByBoard(images: CatalogImage[]): Board[] {
   }
   for (const b of map.values()) {
     b.images.sort((x, y) => compareVersions(y.releaseInfo.version, x.releaseInfo.version)
+      || Number(isLts(y.ubuntuVersion)) - Number(isLts(x.ubuntuVersion))
+      || ubuntuNumber(y.ubuntuVersion) - ubuntuNumber(x.ubuntuVersion)
+      || (x.branch === 'edge' ? 0 : 1) - (y.branch === 'edge' ? 0 : 1)
       || x.branch.localeCompare(y.branch) || x.release.localeCompare(y.release));
   }
   return [...map.values()].sort((a, b) => a.boardName.localeCompare(b.boardName));
