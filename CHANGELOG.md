@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.1.3
+
+A pre-release, still not tested on hardware.
 
 - New: an image file on this computer can be written to an SD card or USB
   drive ("Use an image file on this computer" on the Board and Image steps,
