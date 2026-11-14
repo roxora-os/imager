@@ -1,6 +1,7 @@
 // What the preload script exposes to the page as window.imager.
 import type { CatalogImage } from './catalog';
 import type { HiddenDrive, Target } from './targets';
+import type { UpdateCheck, UpdateResult } from './update';
 
 export type CatalogResult =
   | { state: 'ok'; images: CatalogImage[]; problems: string[]; sample: boolean }
@@ -92,9 +93,19 @@ export interface ImagerApi {
   releaseMaskrom(token: string): Promise<void>;
   onUsbChoice(cb: (choices: { deviceId: string; productName?: string; productId: number }[]) => void): () => void;
   answerUsbChoice(deviceId: string): void;
-  getSettings(): Promise<{ updateCheck: boolean; resetAfterMaskrom: boolean }>;
-  setSettings(s: { updateCheck?: boolean; resetAfterMaskrom?: boolean }): Promise<void>;
-  checkUpdate(force: boolean): Promise<{ version: string; url: string } | null>;
+  getSettings(): Promise<{ updateCheck: boolean; betaUpdates?: boolean; resetAfterMaskrom: boolean }>;
+  setSettings(s: { updateCheck?: boolean; betaUpdates?: boolean; resetAfterMaskrom?: boolean }): Promise<void>;
+  /**
+   * Is a newer version out? `force`: the user asked; otherwise at most once
+   * a day, and null when there is nothing to say. The web build is always
+   * the newest and answers null.
+   */
+  checkUpdate(force: boolean): Promise<UpdateCheck | null>;
+  /** Desktop only: download and install the version the last check offered. The page asks the user first. */
+  installUpdate?(): Promise<UpdateResult>;
+  cancelUpdate?(): Promise<void>;
+  restartApp?(): Promise<void>;
+  onUpdateProgress?(cb: (p: { bytes: number; total: number }) => void): () => void;
   openExternal(url: string): Promise<void>;
   setTheme(theme: 'light' | 'dark'): void;
 }

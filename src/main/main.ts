@@ -19,7 +19,7 @@ import { describeLocal, measureFile, sha256OfFile } from './local-image';
 import { handleProtocol, ORIGIN, registerScheme } from './protocol';
 import { macWrite } from './mac-write';
 import { loadSettings, saveSettings } from './settings';
-import { checkForUpdate } from './updater';
+import { cancelUpdate, checkForUpdate, installUpdate, restartApp } from './updater';
 import { installUsbHandlers, ROCKCHIP_VID, type UsbChoice } from './usb';
 
 registerScheme();
@@ -331,17 +331,23 @@ ipcMain.on('usb:answer', (e, deviceId: string) => {
 
 ipcMain.handle('settings:get', () => {
   const s = loadSettings();
-  return { updateCheck: s.updateCheck, resetAfterMaskrom: s.resetAfterMaskrom };
+  return { updateCheck: s.updateCheck, betaUpdates: s.betaUpdates, resetAfterMaskrom: s.resetAfterMaskrom };
 });
-ipcMain.handle('settings:set', (_e, patch: { updateCheck?: boolean; resetAfterMaskrom?: boolean }) => {
+ipcMain.handle('settings:set', (_e, patch: { updateCheck?: boolean; betaUpdates?: boolean; resetAfterMaskrom?: boolean }) => {
   const s = loadSettings();
   saveSettings({
     ...s,
     ...(typeof patch.updateCheck === 'boolean' ? { updateCheck: patch.updateCheck } : {}),
+    ...(typeof patch.betaUpdates === 'boolean' ? { betaUpdates: patch.betaUpdates } : {}),
     ...(typeof patch.resetAfterMaskrom === 'boolean' ? { resetAfterMaskrom: patch.resetAfterMaskrom } : {}),
   });
 });
 ipcMain.handle('update:check', (_e, force: boolean) => checkForUpdate(force === true));
+// Only after the user pressed Update and confirmed (the page asks), and never during a write.
+ipcMain.handle('update:install', (e) => (job
+  ? { ok: false, reason: 'A write is running. Update when it is done.' } : installUpdate(e.sender)));
+ipcMain.handle('update:cancel', () => cancelUpdate());
+ipcMain.handle('update:restart', () => { if (!job) restartApp(); });
 ipcMain.handle('open-external', (_e, url: string) => {
   if (/^https:\/\/(github\.com\/roxora-os\/|roxora-os\.github\.io\/|zadig\.akeo\.ie\/)/.test(url)) return shell.openExternal(url);
 });

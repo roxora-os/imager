@@ -32,6 +32,14 @@ const api: ImagerApi = {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (s) => ipcRenderer.invoke('settings:set', s),
   checkUpdate: (force) => ipcRenderer.invoke('update:check', force),
+  installUpdate: () => ipcRenderer.invoke('update:install'),
+  cancelUpdate: () => ipcRenderer.invoke('update:cancel'),
+  restartApp: () => ipcRenderer.invoke('update:restart'),
+  onUpdateProgress: (cb) => {
+    const h = (_e: unknown, p: { bytes: number; total: number }) => cb(p);
+    ipcRenderer.on('update:progress', h);
+    return () => { ipcRenderer.off('update:progress', h); };
+  },
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   setTheme: (t) => ipcRenderer.send('theme', t),
 };
