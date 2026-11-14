@@ -15,10 +15,11 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { groupByBoard, type Board, type CatalogImage } from '../shared/catalog';
 import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../shared/boardsearch';
 import { formatBytes, statusWords } from '../shared/format';
-import type { CatalogResult, ImagerApi, JobProgress, PreparedFile } from '../shared/ipc';
+import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile } from '../shared/ipc';
 import type { HiddenDrive, Target } from '../shared/targets';
 import { maskromBoard, STORAGES, type StorageId } from '../maskrom/boards';
 import { RKBIN_HOST } from '../maskrom/loaders';
+import { SPI_FLASH_FALLBACK, spiFileProblem } from '../maskrom/spi-check';
 import type { Stage } from '../maskrom/sequence';
 import { startMaskrom, type MaskromJob } from './maskrom-client';
 import { readTheme, applyTheme, type Theme } from './theme';
@@ -115,18 +116,78 @@ function StepPage({ title, lead, notices, children }: {
   );
 }
 
+/** What the Board and Image steps need to offer an image file on this computer (desktop only). */
+interface LocalPick {
+  local: LocalImage | null; busy: boolean; error: string | null; pick: () => void; clear: () => void;
+}
+const LOCAL_BUTTON = 'Use an image file on this computer';
+
+/** The file chosen for the SD/USB path, and plainly whether a release vouches for it. */
+function LocalImageRow({ lp }: { lp: LocalPick }) {
+  if (!api.pickLocalImage) return null;
+  const { local } = lp;
+  return (
+    <Stack hasGutter className="local-image">
+      <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
+        <FlexItem flex={{ default: 'flexNone' }}>
+          <Button variant="secondary" onClick={lp.pick} isLoading={lp.busy} isDisabled={lp.busy}>{LOCAL_BUTTON}</Button>
+        </FlexItem>
+        <FlexItem>
+          {local ? `${local.name}, ${formatBytes(local.size)}`
+            : 'A downloaded .img, .img.xz, .img.gz or .img.bz2, for an SD card or USB drive. You can also drop the file on this window.'}
+        </FlexItem>
+        {local && <FlexItem><Button variant="link" isInline onClick={lp.clear}>Remove</Button></FlexItem>}
+      </Flex>
+      {lp.error && <Alert variant="danger" isInline isPlain title={lp.error} />}
+      {local && !local.imageId && (
+        <Alert isInline variant="warning" title="Not a Roxora release image">
+          {local.name} is not a file of the Roxora releases listed here, so it was not checked against one. It is
+          written as it is; afterwards the drive is read back and compared with the file.
+        </Alert>
+      )}
+      {local?.imageId && (
+        <Alert isInline variant="success" title="This file is the release image selected above">
+          Its SHA-256 matches the release. It is written from this computer, without a download.
+        </Alert>
+      )}
+    </Stack>
+  );
+}
+
+/** Moves the wizard to a step when the app asks for it (a file was chosen or dropped). */
+function Jump({ to, done }: { to: string | null; done: () => void }) {
+  const ctx = useWizardContext();
+  useEffect(() => {
+    if (!to) return;
+    ctx?.goToStepById?.(to);
+    done();
+  }, [to]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
 interface FindState { query: string; setQuery: (q: string) => void; vendor: string; setVendor: (v: string) => void }
 
-function BoardStep({ catalog, boards, board, setBoard, reload, find, notices }: {
+function BoardStep({ catalog, boards, board, setBoard, reload, find, notices, lp }: {
   catalog: CatalogResult | null; boards: Board[]; board: string | null;
-  setBoard: (b: string) => void; reload: () => void; find: FindState; notices: React.ReactNode;
+  setBoard: (b: string) => void; reload: () => void; find: FindState; notices: React.ReactNode; lp: LocalPick;
 }) {
+  // Without the release list a downloaded image can still be written.
+  const localAction = api.pickLocalImage && (
+    <Button variant="secondary" onClick={lp.pick} isLoading={lp.busy} isDisabled={lp.busy}>{LOCAL_BUTTON}</Button>
+  );
+  const localError = lp.error && <EmptyStateBody><Alert variant="danger" isInline isPlain title={lp.error} /></EmptyStateBody>;
   if (!catalog) return <EmptyState titleText="Loading releases" headingLevel="h2" icon={Spinner} />;
   if (catalog.state === 'error') {
     return (
       <EmptyState titleText="Could not load the releases" headingLevel="h2">
         <EmptyStateBody>{catalog.message}</EmptyStateBody>
-        <EmptyStateFooter><Button variant="secondary" onClick={reload}>Try again</Button></EmptyStateFooter>
+        {localError}
+        <EmptyStateFooter>
+          <EmptyStateActions>
+            <Button variant="secondary" onClick={reload}>Try again</Button>
+            {localAction}
+          </EmptyStateActions>
+        </EmptyStateFooter>
       </EmptyState>
     );
   }
@@ -137,9 +198,11 @@ function BoardStep({ catalog, boards, board, setBoard, reload, find, notices }: 
           Roxora images are published as releases of roxora-os/build. There are none yet, so there is nothing to
           write. This list fills itself once the first release is out.
         </EmptyStateBody>
+        {localError}
         <EmptyStateFooter>
           <EmptyStateActions>
             <Button variant="secondary" onClick={reload}>Check again</Button>
+            {localAction}
             <Button variant="link" component="a" href={RELEASES_URL} target="_blank">Releases on GitHub</Button>
           </EmptyStateActions>
         </EmptyStateFooter>
@@ -147,7 +210,13 @@ function BoardStep({ catalog, boards, board, setBoard, reload, find, notices }: 
     );
   }
   return (
-    <StepPage title="Board" lead="Choose the board you want to install Roxora on." notices={notices}>
+    <StepPage title="Board" notices={notices} lead={api.pickLocalImage ? (
+      <>
+        Choose the board you want to install Roxora on. Already downloaded an image?{' '}
+        <Button variant="link" isInline onClick={lp.pick} isDisabled={lp.busy}>{LOCAL_BUTTON}</Button>
+      </>
+    ) : 'Choose the board you want to install Roxora on.'}>
+      {lp.error && <Alert variant="danger" isInline isPlain title={lp.error} />}
       <BoardPicker boards={boards} board={board} setBoard={setBoard} find={find} />
     </StepPage>
   );
@@ -249,28 +318,35 @@ function BoardPicker({ boards, board, setBoard, find }: {
   );
 }
 
-function ImageStep({ board, imageId, setImage }: {
-  board: Board | undefined; imageId: string | null; setImage: (id: string) => void;
+function ImageStep({ board, imageId, setImage, lp }: {
+  board: Board | undefined; imageId: string | null; setImage: (id: string) => void; lp: LocalPick;
 }) {
-  if (!board) return null;
-  const sel = board.images.find((i) => i.id === imageId);
+  if (!board && !lp.local) return null;
+  // A custom file takes the place of a release image; a file that is a
+  // release image keeps that image selected.
+  const custom = !!lp.local && !lp.local.imageId;
+  const selected = custom ? null : imageId;
+  const sel = board?.images.find((i) => i.id === selected);
   return (
-    <StepPage title="Image" lead={`Images for ${board.boardName}, newest first.`} >
-      <Table aria-label="Images" variant="compact">
-        <Thead><Tr><Th screenReaderText="Select" /><Th>Release</Th><Th>Ubuntu</Th><Th>Kernel</Th><Th>Download</Th><Th>Status</Th></Tr></Thead>
-        <Tbody>
-          {board.images.map((img, i) => (
-            <Tr key={img.id} isClickable onRowClick={() => setImage(img.id)} isRowSelected={imageId === img.id}>
-              <Td select={{ rowIndex: i, variant: 'radio', isSelected: imageId === img.id, onSelect: () => setImage(img.id) }} />
-              <Td dataLabel="Release">{releaseWords(img)}<div className="muted">{img.releaseInfo.date}</div></Td>
-              <Td dataLabel="Ubuntu">{img.ubuntuVersion} ({img.release})</Td>
-              <Td dataLabel="Kernel">{img.kernel ? `${img.kernel} ` : ''}{img.branch}</Td>
-              <Td dataLabel="Download">{formatBytes(img.size)}</Td>
-              <Td dataLabel="Status">{img.status === 'hardware-tested' ? 'Tested on hardware' : 'CI only'}</Td>
-            </Tr>
-          ))}
-        </Tbody>
-      </Table>
+    <StepPage title="Image" lead={board ? `Images for ${board.boardName}, newest first.`
+      : 'No board is chosen, so no release images are listed.'}>
+      {board && (
+        <Table aria-label="Images" variant="compact">
+          <Thead><Tr><Th screenReaderText="Select" /><Th>Release</Th><Th>Ubuntu</Th><Th>Kernel</Th><Th>Download</Th><Th>Status</Th></Tr></Thead>
+          <Tbody>
+            {board.images.map((img, i) => (
+              <Tr key={img.id} isClickable onRowClick={() => setImage(img.id)} isRowSelected={selected === img.id}>
+                <Td select={{ rowIndex: i, variant: 'radio', isSelected: selected === img.id, onSelect: () => setImage(img.id) }} />
+                <Td dataLabel="Release">{releaseWords(img)}<div className="muted">{img.releaseInfo.date}</div></Td>
+                <Td dataLabel="Ubuntu">{img.ubuntuVersion} ({img.release})</Td>
+                <Td dataLabel="Kernel">{img.kernel ? `${img.kernel} ` : ''}{img.branch}</Td>
+                <Td dataLabel="Download">{formatBytes(img.size)}</Td>
+                <Td dataLabel="Status">{img.status === 'hardware-tested' ? 'Tested on hardware' : 'CI only'}</Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      )}
       {sel && (
         <Content component="p" className="step-lead">
           {statusWords(sel.status)}. {sel.releaseInfo.prerelease
@@ -278,6 +354,7 @@ function ImageStep({ board, imageId, setImage }: {
           <Button variant="link" isInline component="a" href={sel.releaseInfo.url} target="_blank">Release notes</Button>
         </Content>
       )}
+      <LocalImageRow lp={lp} />
     </StepPage>
   );
 }
@@ -326,6 +403,10 @@ function DestinationStep(p: {
   file: PreparedFile | null; pickFile: () => void; picking: boolean; fileError: string | null;
   releaseFile: PreparedFile | null; pickRelease: () => void; checking: Checking | null;
   downloadRelease: () => void; proxyError: string | null;
+  /** An image file from this computer that is no release image: SD card or USB drive only. */
+  custom: boolean;
+  /** Why the chosen file must not go to SPI NOR flash (maskrom/spi-check.ts). */
+  spiProblem: string | null;
 }) {
   const mb = maskromBoard(p.boardId);
   // A file picker under the radio it belongs to, indented like the radio's description.
@@ -388,9 +469,10 @@ function DestinationStep(p: {
             <Radio id="method-sd" name="method" isChecked={p.method === 'sd'} onChange={() => p.setMethod('sd')}
               label="SD card or USB drive" description="Write the image to a card or stick in this computer, then boot the board from it." />
             <Radio id="method-maskrom" name="method" isChecked={p.method === 'maskrom'} onChange={() => p.setMethod('maskrom')}
-              isDisabled={!mb}
+              isDisabled={!mb || p.custom}
               label="Board storage over USB (Maskrom)"
-              description={mb ? `Through the board's USB-C port: ${mb.storages.map((s) => STORAGES[s].label).join(', or ')}. ${LOADER_NOTE}`
+              description={p.custom ? 'Not for the image file chosen in the Image step. Choose a board and one of its release images to write over USB; a file can be chosen there as well.'
+                : mb ? `Through the board's USB-C port: ${mb.storages.map((s) => STORAGES[s].label).join(', or ')}. ${LOADER_NOTE}`
                 : `Maskrom writing is not set up for ${p.boardName}.`} />
           </FormGroup>
         )}
@@ -453,12 +535,15 @@ function DestinationStep(p: {
                   body={releasePicker('spi')} />
               )}
               <Radio id="src-file" name="source" isChecked={p.source === 'file'} onChange={() => p.setSource('file')}
-                label="A file on this computer" description="An image or bootloader file (.img, .bin, or compressed with xz, gzip or bzip2). It is written from the first sector."
+                label="A file on this computer"
+                description={p.storage === 'spinor' ? 'A bootloader file (.img, .bin, or compressed with xz, gzip or bzip2), no larger than the SPI NOR flash. It is written from the first sector.'
+                  : 'An image or bootloader file (.img, .bin, or compressed with xz, gzip or bzip2). It is written from the first sector.'}
                 body={p.source === 'file' ? fileRow(
                   <Button variant="secondary" onClick={p.pickFile} isLoading={p.picking} isDisabled={p.picking}>Choose file</Button>,
                   p.file ? `${p.file.name}, ${formatBytes(p.file.size)}` : 'No file chosen',
                 ) : undefined} />
               {p.fileError && <Alert variant="danger" isInline isPlain title={p.fileError} />}
+              {p.spiProblem && <Alert variant="danger" isInline isPlain title={p.spiProblem} />}
             </FormGroup>
             <FormGroup fieldId="connect" label="Connect the board in Maskrom mode">
               <Content id="connect">
@@ -524,7 +609,7 @@ function RunView({ run, onCancel, onDone, reconnect }: { run: Run; onCancel: () 
         )}
         {run.result && (
           <Alert isInline variant={run.result.ok ? 'success' : 'danger'} title={run.result.title}>
-            <p>{run.result.text}</p>
+            {run.result.text && <p>{run.result.text}</p>}
             {run.result.detail && <p className="detail">{run.result.detail}</p>}
           </Alert>
         )}
@@ -605,6 +690,10 @@ export function App() {
   const [checking, setChecking] = useState<Checking | null>(null);
   const [proxyError, setProxyError] = useState<string | null>(null);
   const [reconnect, setReconnect] = useState(false);
+  const [local, setLocal] = useState<LocalImage | null>(null);
+  const [localBusy, setLocalBusy] = useState(false);
+  const [localError, setLocalError] = useState<string | null>(null);
+  const [jump, setJump] = useState<string | null>(null);
   const [confirm, setConfirm] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const [settings, setSettings] = useState(false);
@@ -625,6 +714,8 @@ export function App() {
   const image = cur?.images.find((i) => i.id === imageId);
   const mb = board ? maskromBoard(board) : undefined;
   const sample = catalog?.state === 'ok' && catalog.sample;
+  // A file from this computer that no release vouches for.
+  const custom = !!local && !local.imageId;
 
   const chooseBoard = (b: string) => {
     if (b === board) return;
@@ -642,13 +733,66 @@ export function App() {
     else if (source === 'file' && !file && image?.spi && mb && !mb.imageStorage && storage === 'spinor') setSource('spi');
   }, [imageId]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const minSize = local && !local.imageId ? local.extractSize : image?.extractSize ?? 0;
   const refreshDrives = useCallback(() => {
     setDrives(null);
-    api.listDrives(image?.extractSize ?? 0).then((d) => {
+    api.listDrives(minSize).then((d) => {
       setDrives(d);
       setDevice((cur) => (d.targets.some((t) => t.device === cur && !t.disabled) ? cur : null));
     });
-  }, [image?.extractSize]);
+  }, [minSize]);
+
+  // An image file on this computer for the SD/USB path. One that is a
+  // release image selects that image; any other is a custom image.
+  const acceptLocal = (r: LocalImage | { error: string } | null) => {
+    if (!r) return;
+    if ('error' in r) {
+      setLocalError(r.error);
+      // The message shows on the Board and Image steps.
+      if (board || local) setJump('image');
+      return;
+    }
+    setLocalError(null);
+    setLocal(r);
+    const img = r.imageId && catalog?.state === 'ok' ? catalog.images.find((i) => i.id === r.imageId) : undefined;
+    if (img) {
+      chooseBoard(img.board);
+      setImageId(img.id);
+    } else {
+      setMethod('sd');
+    }
+    setJump('image');
+  };
+  const pickLocal = async () => {
+    if (!api.pickLocalImage || localBusy) return;
+    setLocalBusy(true);
+    const r = await api.pickLocalImage();
+    setLocalBusy(false);
+    acceptLocal(r);
+  };
+  const lp: LocalPick = { local, busy: localBusy, error: localError, pick: pickLocal, clear: () => { setLocal(null); setLocalError(null); } };
+  // A file dropped anywhere on the window, while no write is running.
+  const dropRef = useRef<(f: File) => void>(() => {});
+  dropRef.current = async (f: File) => {
+    if (!api.dropLocalImage || run || localBusy) return;
+    setLocalBusy(true);
+    const r = await api.dropLocalImage(f);
+    setLocalBusy(false);
+    acceptLocal(r);
+  };
+  useEffect(() => {
+    if (!api.dropLocalImage) return undefined;
+    const over = (e: DragEvent) => { if (e.dataTransfer?.types.includes('Files')) e.preventDefault(); };
+    const drop = (e: DragEvent) => {
+      const f = e.dataTransfer?.files[0];
+      if (!f) return;
+      e.preventDefault();
+      dropRef.current(f);
+    };
+    window.addEventListener('dragover', over);
+    window.addEventListener('drop', drop);
+    return () => { window.removeEventListener('dragover', over); window.removeEventListener('drop', drop); };
+  }, []);
 
   const pickFile = async () => {
     setPicking(true);
@@ -686,13 +830,19 @@ export function App() {
   useEffect(() => { setReleaseFile(null); setProxyError(null); }, [imageId, source]);
 
   const target = drives?.targets.find((t) => t.device === device);
+  const spiProblem = method === 'maskrom' && storage === 'spinor' && source === 'file' && file
+    ? spiFileProblem(file, {
+      flashSize: mb?.spiFlashSize ?? SPI_FLASH_FALLBACK,
+      imageFiles: catalog?.state === 'ok' ? catalog.images.map((i) => i.file) : [],
+      spiFile: image?.spi?.file ?? null,
+    }) : null;
   const destReady = method === 'sd' ? !!target
-    : !!storage && (source === 'file' ? !!file
+    : !!storage && (source === 'file' ? !!file && !spiProblem
       : source === 'spi' ? !!image?.spi && storage === 'spinor' && (!WEB || !!releaseFile)
         : !!image && !!mb?.wholeImage.includes(storage) && (!WEB || !!releaseFile));
 
   let why: string | null = null;
-  if (sample) why = 'Sample data cannot be written.';
+  if (sample && !custom) why = 'Sample data cannot be written.';
   else if (!destReady) why = 'Choose a destination first.';
 
   const erasedWhat = method === 'sd'
@@ -701,28 +851,35 @@ export function App() {
   const erased = erasedWhat ? `Everything on ${erasedWhat}.` : '';
 
   const startSd = async () => {
-    if (!image || !target) return;
+    if (!target || (!local && !image)) return;
+    const name = local ? local.name : image!.file;
     const r: Run = {
       kind: 'sd', log: [], result: null,
       stages: [
-        { id: 'download', label: 'Download and check', percent: 0 },
+        { id: 'download', percent: 0, label: custom ? 'Read the image and take its SHA-256'
+          : local ? 'Check the file against the release' : 'Download and check' },
         { id: 'write', label: `Write ${target.device}`, percent: 0 },
-        { id: 'verify', label: 'Read back and compare with the release', percent: 0 },
+        { id: 'verify', label: custom ? 'Read back and compare with the image' : 'Read back and compare with the release', percent: 0 },
       ],
     };
     setRun(r);
     const off = api.onProgress((p: JobProgress) => {
       const id = p.stage === 'check' || p.stage === 'download' ? 'download' : p.stage;
       const pct = p.total ? Math.min(100, Math.floor(p.bytes * 100 / p.total)) : null;
-      setRun((cur) => cur && { ...cur, stages: cur.stages.map((s) => (s.id === id ? { ...s, percent: pct } : s)) });
+      // A stage that has started means the ones before it are done.
+      setRun((cur) => cur && { ...cur, stages: cur.stages.map((s) => (s.id === id ? { ...s, percent: pct }
+        : s.id === 'download' && id !== 'download' ? { ...s, percent: 100 } : s)) });
     });
-    const res = await api.writeSd(image.id, target.device);
+    const res = local && api.writeLocalImage ? await api.writeLocalImage(local.token, target.device)
+      : await api.writeSd(image!.id, target.device);
     off();
     setRun((cur) => cur && {
       ...cur,
       result: res.ok
-        ? { ok: true, title: 'Written and verified', text: `${target.description} holds ${image.file}. The read-back matches the release (SHA-256 ${res.sha256}). You can remove the drive.` }
-        : { ok: false, title: res.reason, text: 'The drive may be partly written.', ...(res.detail ? { detail: res.detail } : {}) },
+        ? { ok: true, title: 'Written and verified', text: custom
+          ? `${target.description} holds ${name}. The read-back matches the image file (SHA-256 ${res.sha256}). The file is not a Roxora release image and was not checked against one. You can remove the drive.`
+          : `${target.description} holds ${name}. The read-back matches the release (SHA-256 ${res.sha256}). You can remove the drive.` }
+        : { ok: false, title: res.reason, text: /Nothing was written/.test(res.reason) ? '' : 'The drive may be partly written.', ...(res.detail ? { detail: res.detail } : {}) },
     });
   };
 
@@ -838,34 +995,45 @@ export function App() {
     <Shell onSettings={() => setSettings(true)}>
       {run ? <RunView run={run} onCancel={cancel} onDone={finishRun} reconnect={reconnect} /> : (
         <PageSection type="wizard" isFilled hasBodyWrapper={false} aria-label="Write an image">
-          <Wizard navAriaLabel="Steps" isVisitRequired onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
-            <WizardStep name="Board" id="board" footer={{ isNextDisabled: !board, isCancelHidden: true }}>
-              <BoardStep catalog={catalog} boards={boards} board={board} setBoard={chooseBoard} reload={load}
-                find={{ query, setQuery, vendor, setVendor }} notices={notices} />
+          <Wizard navAriaLabel="Steps" isVisitRequired header={<Jump to={jump} done={() => setJump(null)} />} onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
+            <WizardStep name="Board" id="board" footer={{ isNextDisabled: !board && !local, isCancelHidden: true }}>
+              {/* Choosing a board means choosing among its release images: a custom file goes. */}
+              <BoardStep catalog={catalog} boards={boards} board={board} reload={load}
+                setBoard={(b) => { if (b !== board) setLocal(null); chooseBoard(b); }}
+                find={{ query, setQuery, vendor, setVendor }} notices={notices} lp={lp} />
             </WizardStep>
-            <WizardStep name="Image" id="image" isDisabled={!board} footer={{ isNextDisabled: !imageId, isCancelHidden: true }}>
-              <ImageStep board={cur} imageId={imageId} setImage={setImageId} />
+            <WizardStep name="Image" id="image" isDisabled={!board && !local} footer={{ isNextDisabled: !imageId && !local, isCancelHidden: true }}>
+              <ImageStep board={cur} imageId={imageId} setImage={(id) => { setLocal(null); setImageId(id); }} lp={lp} />
             </WizardStep>
-            <WizardStep name="Destination" id="dest" isDisabled={!imageId} footer={{ isNextDisabled: !destReady, isCancelHidden: true, nextButtonText: 'Review' }}>
+            <WizardStep name="Destination" id="dest" isDisabled={!imageId && !local} footer={{ isNextDisabled: !destReady, isCancelHidden: true, nextButtonText: 'Review' }}>
               <DestinationStep boardName={cur?.boardName ?? ''} boardId={board ?? ''} image={image}
                 method={method} setMethod={(m) => { setMethod(m); if (m === 'sd') refreshDrives(); }}
                 drives={drives} refreshDrives={refreshDrives} device={device} setDevice={setDevice}
                 storage={storage} setStorage={(s) => { setStorage(s); setSource(mb?.wholeImage.includes(s) ? 'release' : s === 'spinor' && image?.spi ? 'spi' : 'file'); }}
                 source={source} setSource={setSource} file={file} pickFile={pickFile} picking={picking} fileError={fileError}
                 releaseFile={releaseFile} pickRelease={pickRelease} checking={checking}
-                downloadRelease={downloadRelease} proxyError={proxyError} />
+                downloadRelease={downloadRelease} proxyError={proxyError} custom={custom} spiProblem={spiProblem} />
             </WizardStep>
             <WizardStep name="Review" id="review" isDisabled={!destReady}
               footer={<ReviewFooter canWrite={!why} why={why} onWrite={onWrite} />}>
               <StepPage title="Review" lead="Nothing has been written yet. Check this before you go on." notices={writeNotices}>
                 {erasedWhat && <Alert isInline variant="danger" title={`Everything on ${erasedWhat} will be erased.`} />}
               <DescriptionList isHorizontal>
-                <DescriptionListGroup><DescriptionListTerm>Board</DescriptionListTerm><DescriptionListDescription>{cur?.boardName}</DescriptionListDescription></DescriptionListGroup>
-                {(method === 'sd' || source === 'release') && image && (
+                {!custom && <DescriptionListGroup><DescriptionListTerm>Board</DescriptionListTerm><DescriptionListDescription>{cur?.boardName}</DescriptionListDescription></DescriptionListGroup>}
+                {custom && local && (
+                  <>
+                    <DescriptionListGroup><DescriptionListTerm>Image</DescriptionListTerm><DescriptionListDescription>{local.name}, {formatBytes(local.size)}, a file on this computer</DescriptionListDescription></DescriptionListGroup>
+                    <DescriptionListGroup><DescriptionListTerm>Release</DescriptionListTerm><DescriptionListDescription>Not a Roxora release image. It was not checked against one.</DescriptionListDescription></DescriptionListGroup>
+                  </>
+                )}
+                {!custom && (method === 'sd' || source === 'release') && image && (
                   <>
                     <DescriptionListGroup><DescriptionListTerm>Image</DescriptionListTerm><DescriptionListDescription>{image.file}</DescriptionListDescription></DescriptionListGroup>
                     <DescriptionListGroup><DescriptionListTerm>Release</DescriptionListTerm><DescriptionListDescription>{releaseWords(image)}, {image.releaseInfo.date}. {statusWords(image.status)}.</DescriptionListDescription></DescriptionListGroup>
                   </>
+                )}
+                {method === 'sd' && local?.imageId && (
+                  <DescriptionListGroup><DescriptionListTerm>File</DescriptionListTerm><DescriptionListDescription>{local.name} on this computer; its SHA-256 matches the release</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {method === 'maskrom' && source === 'spi' && image?.spi && (
                   <DescriptionListGroup><DescriptionListTerm>SPI bootloader</DescriptionListTerm><DescriptionListDescription>{image.spi.file}, {formatBytes(image.spi.size)}, from {releaseWords(image).toLowerCase()}</DescriptionListDescription></DescriptionListGroup>
@@ -881,7 +1049,9 @@ export function App() {
                     : (storage ? `${STORAGES[storage].label} of the board, over USB in Maskrom mode` : '')}
                 </DescriptionListDescription></DescriptionListGroup>
                 <DescriptionListGroup><DescriptionListTerm>Checks</DescriptionListTerm><DescriptionListDescription>
-                  {method === 'sd' || source === 'release' || source === 'spi'
+                  {custom ? 'The image is read once to take its SHA-256. After writing, the drive is read back and compared with it. Nothing is compared with a Roxora release.'
+                    : method === 'sd' && local ? 'The file is checked against the release SHA-256 again. After writing, the drive is read back and compared with the release SHA-256.'
+                    : method === 'sd' || source === 'release' || source === 'spi'
                     ? 'The download is checked against the release SHA-256. After writing, the destination is read back and compared with the release SHA-256.'
                     : 'After writing, the storage is read back and compared with the file.'}
                 </DescriptionListDescription></DescriptionListGroup>

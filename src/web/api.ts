@@ -15,6 +15,7 @@ import {
 import type { CatalogResult, ImagerApi, PreparedFile } from '../shared/ipc';
 import { downloadVerified, proxyBase, proxyUrl, releaseFile } from './proxy';
 import { buildLoader, isPinnedLoader, LOADERS } from '../maskrom/loaders';
+import { partitionedSize } from '../maskrom/spi-check';
 
 declare const __APP_VERSION__: string;
 declare const __DOWNLOAD_PROXY__: string;
@@ -208,7 +209,14 @@ export const webApi: ImagerApi = {
   async pickMaskromFile() {
     const file = await pickFile('.img,.bin,.xz');
     if (!file) return null;
-    return { token: `web-${++tokens}`, url: '', file, size: file.size, sha256: null, name: file.name };
+    // For the SPI NOR check (maskrom/spi-check.ts). A compressed file's
+    // start cannot be read here without decompressing it: then only its
+    // name and compressed size are checked before the write.
+    const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
+    const compressed = (head[0] === 0xfd && head[1] === 0x37) || (head[0] === 0x1f && head[1] === 0x8b)
+      || (head[0] === 0x42 && head[1] === 0x5a && head[2] === 0x68);
+    return { token: `web-${++tokens}`, url: '', file, size: file.size, sha256: null, name: file.name,
+      ...(compressed ? {} : { diskSize: partitionedSize(head) }) };
   },
   downloadProxy: DOWNLOAD_PROXY ? new URL(DOWNLOAD_PROXY).host : null,
   downloadReleaseFile: (imageId, what, onProgress) => fetchReleaseFile(DOWNLOAD_PROXY, writable.get(imageId), what, onProgress),
