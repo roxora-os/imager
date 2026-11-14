@@ -12,7 +12,7 @@ import {
 } from '@patternfly/react-core';
 import { CogIcon } from '@patternfly/react-icons/dist/esm/icons/cog-icon';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
-import { groupByBoard, type Board, type CatalogImage } from '../shared/catalog';
+import { flavorWords, groupByBoard, type Board, type CatalogImage } from '../shared/catalog';
 import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../shared/boardsearch';
 import { formatBytes, statusWords } from '../shared/format';
 import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile } from '../shared/ipc';
@@ -339,7 +339,7 @@ function ImageStep({ board, imageId, setImage, lp }: {
               <Tr key={img.id} isClickable onRowClick={() => setImage(img.id)} isRowSelected={selected === img.id}>
                 <Td select={{ rowIndex: i, variant: 'radio', isSelected: selected === img.id, onSelect: () => setImage(img.id) }} />
                 <Td dataLabel="Release">{releaseWords(img)}<div className="muted">{img.releaseInfo.date}</div></Td>
-                <Td dataLabel="Ubuntu">{img.ubuntuVersion} ({img.release})</Td>
+                <Td dataLabel="Ubuntu">{img.ubuntuVersion} ({img.release})<div className="muted">{flavorWords(img.flavor)}</div></Td>
                 <Td dataLabel="Kernel">{img.kernel ? `${img.kernel} ` : ''}{img.branch}</Td>
                 <Td dataLabel="Download">{formatBytes(img.size)}</Td>
                 <Td dataLabel="Status">{img.status === 'hardware-tested' ? 'Tested on hardware' : 'CI only'}</Td>

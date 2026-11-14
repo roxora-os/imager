@@ -12,6 +12,28 @@ export const DOWNLOAD_PREFIX = `https://github.com/${RELEASES_REPO}/releases/dow
 
 export type ImageStatus = 'hardware-tested' | 'ci-only';
 
+/**
+ * What an image is, images[].flavor in the catalog: a command line image or
+ * one with a desktop. Catalogs from before the desktop images have no
+ * flavor; their images are command line images. A flavor this version does
+ * not know is shown by its catalog name.
+ */
+export const FLAVOR_NAMES: Record<string, string> = {
+  cli: 'Command line',
+  'gnome-minimal': 'GNOME desktop, minimal',
+  gnome: 'GNOME desktop',
+};
+
+export function flavorWords(flavor: string): string {
+  return FLAVOR_NAMES[flavor] ?? flavor;
+}
+
+/** Command line first, then the desktops from small to full, then flavors not known here. */
+function flavorRank(flavor: string): number {
+  const i = Object.keys(FLAVOR_NAMES).indexOf(flavor);
+  return i < 0 ? Object.keys(FLAVOR_NAMES).length : i;
+}
+
 export interface CatalogRelease {
   tag: string;
   version: string;
@@ -39,6 +61,8 @@ export interface CatalogImage {
   release: string;
   ubuntuVersion: string;
   branch: string;
+  /** "cli", "gnome-minimal" or "gnome"; "cli" when the catalog names none. */
+  flavor: string;
   kernel: string;
   file: string;
   url: string;
@@ -138,15 +162,17 @@ function parseImage(raw: unknown, index: number, release: CatalogRelease, sample
   const verifyUrl = typeof raw.verify_url === 'string' ? raw.verify_url : '';
   if (problems.length !== n) return null;
   const vendor = typeof raw.vendor === 'string' && raw.vendor.trim() ? raw.vendor.trim() : vendorFallback(boardName!);
+  const flavor = typeof raw.flavor === 'string' && raw.flavor ? raw.flavor : 'cli';
 
   const name = `${where} (${file})`;
-  for (const [k, v] of [['board', board], ['release', rel], ['branch', branch], ['soc', soc]] as const) {
+  for (const [k, v] of [['board', board], ['release', rel], ['branch', branch], ['soc', soc], ['flavor', flavor]] as const) {
     if (!NAME.test(v!)) problems.push(`${name}: ${k} "${v}" has characters a name cannot have`);
   }
   if (!HEX64.test(sha256!)) problems.push(`${name}: sha256 is not 64 lower-case hex digits`);
   if (!HEX64.test(extractSha256!)) problems.push(`${name}: extract_sha256 is not 64 lower-case hex digits`);
   if (status !== 'hardware-tested' && status !== 'ci-only') problems.push(`${name}: status "${status}" is unknown`);
-  const expectedFile = `roxora-${board}-${rel}-${branch}-${release.version}.img.xz`;
+  // A command line image has no flavor in its file name.
+  const expectedFile = `roxora-${board}-${rel}-${branch}${flavor === 'cli' ? '' : `-${flavor}`}-${release.version}.img.xz`;
   if (file !== expectedFile) problems.push(`${name}: file name should be ${expectedFile}`);
   // Images are only ever downloaded from this release of roxora-os/build.
   const expectedUrl = `${DOWNLOAD_PREFIX}${release.tag}/${file}`;
@@ -158,7 +184,7 @@ function parseImage(raw: unknown, index: number, release: CatalogRelease, sample
   return {
     id: `${release.tag}/${file}`,
     board: board!, boardName: boardName!, vendor, soc: soc!, release: rel!, ubuntuVersion: ubuntuVersion!,
-    branch: branch!, kernel, file: file!, url: url!, size: size!, sha256: sha256!,
+    branch: branch!, flavor, kernel, file: file!, url: url!, size: size!, sha256: sha256!,
     extractSize: extractSize!, extractSha256: extractSha256!, status: status as ImageStatus,
     verifyUrl, spi, releaseInfo: release, sample,
   };
@@ -266,7 +292,8 @@ const ubuntuNumber = (v: string) => {
 /**
  * Group images by board; boards sorted by name. Within a board: newest Roxora
  * release first, then the newest Ubuntu LTS (the default a user gets), then
- * newer Ubuntu before older, then the edge kernel before others.
+ * newer Ubuntu before older, then the edge kernel before others, then the
+ * command line image before the desktop ones.
  */
 export function groupByBoard(images: CatalogImage[]): Board[] {
   const map = new Map<string, Board>();
@@ -283,7 +310,8 @@ export function groupByBoard(images: CatalogImage[]): Board[] {
       || Number(isLts(y.ubuntuVersion)) - Number(isLts(x.ubuntuVersion))
       || ubuntuNumber(y.ubuntuVersion) - ubuntuNumber(x.ubuntuVersion)
       || (x.branch === 'edge' ? 0 : 1) - (y.branch === 'edge' ? 0 : 1)
-      || x.branch.localeCompare(y.branch) || x.release.localeCompare(y.release));
+      || x.branch.localeCompare(y.branch) || x.release.localeCompare(y.release)
+      || flavorRank(x.flavor) - flavorRank(y.flavor) || x.flavor.localeCompare(y.flavor));
   }
   return [...map.values()].sort((a, b) => a.boardName.localeCompare(b.boardName));
 }

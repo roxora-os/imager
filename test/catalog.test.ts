@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import {
-  catalogAssets, checkAgainstRelease, groupByBoard, isLts, parseCatalog, type GithubRelease,
+  catalogAssets, checkAgainstRelease, flavorWords, groupByBoard, isLts, parseCatalog, type GithubRelease,
 } from '../src/shared/catalog';
 
 const sample = JSON.parse(readFileSync(new URL('../resources/sample-catalog.json', import.meta.url), 'utf8'));
@@ -82,6 +82,32 @@ describe('parseCatalog', () => {
     expect(p.problems[0]).toMatch(/file name should be roxora-radxa-rock-4d-noble-edge-2026.11.0.img.xz/);
   });
 
+  it('reads an image without a flavor as a command line image', () => {
+    expect(parseCatalog(real()).images.map((i) => i.flavor)).toEqual(['cli', 'cli']);
+  });
+
+  it('reads a desktop image, whose file name carries its flavor', () => {
+    const c = real();
+    const file = 'roxora-radxa-rock-4d-noble-edge-gnome-minimal-2026.11.0.img.xz';
+    c.images[0].flavor = 'gnome-minimal';
+    c.images[0].file = file;
+    c.images[0].url = `https://github.com/roxora-os/build/releases/download/v2026.11.0/${file}`;
+    delete c.images[0].spi;
+    c.images[1].flavor = 'cli';
+    const p = parseCatalog(c);
+    expect(p.problems).toEqual([]);
+    expect(p.images.map((i) => i.flavor)).toEqual(['gnome-minimal', 'cli']);
+    expect(p.images[0].id).toBe(`v2026.11.0/${file}`);
+  });
+
+  it('drops a desktop image under a command line file name', () => {
+    const c = real();
+    c.images[0].flavor = 'gnome';
+    const p = parseCatalog(c);
+    expect(p.images).toHaveLength(1);
+    expect(p.problems[0]).toMatch(/file name should be roxora-radxa-rock-4d-noble-edge-gnome-2026.11.0.img.xz/);
+  });
+
   it('rejects names that could escape a path', () => {
     const c = real();
     c.images[0].board = '../etc';
@@ -134,6 +160,18 @@ describe('groupByBoard', () => {
       mk('resolute', '26.04', 'vendor'), mk('resolute', '26.04')]);
     expect(boards[0].images.map((i) => i.id)).toEqual(
       ['resolute-edge', 'resolute-vendor', 'noble-edge', 'stonking-edge']);
+  });
+
+  it('puts the command line image before the desktop ones', () => {
+    const base = parseCatalog(real()).images.find((i) => i.board === 'radxa-rock-4d')!;
+    const mk = (release: string, ubuntuVersion: string, flavor: string) =>
+      ({ ...base, id: `${release}-${flavor}`, release, ubuntuVersion, flavor });
+    const boards = groupByBoard([mk('noble', '24.04', 'cli'), mk('resolute', '26.04', 'gnome'),
+      mk('resolute', '26.04', 'kde'), mk('resolute', '26.04', 'gnome-minimal'), mk('resolute', '26.04', 'cli')]);
+    expect(boards[0].images.map((i) => i.id)).toEqual(
+      ['resolute-cli', 'resolute-gnome-minimal', 'resolute-gnome', 'resolute-kde', 'noble-cli']);
+    expect(['cli', 'gnome-minimal', 'gnome', 'kde'].map(flavorWords)).toEqual(
+      ['Command line', 'GNOME desktop, minimal', 'GNOME desktop', 'kde']);
   });
 
   it('knows which Ubuntu versions are LTS', () => {

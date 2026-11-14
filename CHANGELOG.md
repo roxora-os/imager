@@ -19,6 +19,10 @@
   turned on in Settings, and install.sh installs one only with `BETA=1`.
   The release workflow publishes a tag with a suffix as a pre-release and
   any other tag as a normal release.
+- Images: desktop images are listed. The Image step says under the Ubuntu
+  version whether an image is a command line image or has the GNOME desktop
+  (minimal or full), and lists the command line image first. Releases before
+  the desktop images are read as before.
 
 ## 0.1.3
 

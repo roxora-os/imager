@@ -17,7 +17,7 @@ const NAME = 'roxora-radxa-rock-4d-noble-edge-2026.11.3.img.xz';
 const released = Buffer.concat([XZ, randomBytes(5000)]);
 const image = (over: Partial<CatalogImage> = {}): CatalogImage => ({
   id: `2026.11.3/${NAME}`, board: 'radxa-rock-4d', boardName: 'Radxa ROCK 4D', vendor: 'Radxa', soc: 'rk3576',
-  release: 'noble', ubuntuVersion: '24.04', branch: 'edge', kernel: '6.18', file: NAME, url: 'https://example.invalid/x',
+  release: 'noble', ubuntuVersion: '24.04', branch: 'edge', flavor: 'cli', kernel: '6.18', file: NAME, url: 'https://example.invalid/x',
   size: released.length, sha256: sha(released), extractSize: 4000000000, extractSha256: 'e'.repeat(64),
   status: 'ci-only', verifyUrl: '', spi: null, sample: false,
   releaseInfo: { version: '2026.11.3' } as CatalogImage['releaseInfo'], ...over,
