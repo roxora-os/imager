@@ -74,3 +74,24 @@ eject the drive when the write is done, choose Ignore or Eject.
   ```
 
 Writing an SD card asks for your password (pkexec), as Etcher does.
+
+## Writing an image you downloaded
+
+Roxora Imager downloads release images itself, but it also takes a file you
+already have, for an SD card or USB drive: click **Use an image file on this
+computer** on the Board or Image step, or drop the file on the window. It
+takes .img files, plain or compressed with xz, gzip or bzip2.
+
+- A file from the Roxora releases (for example
+  `roxora-radxa-rock-4d-noble-edge-2026.11.3.img.xz`, under its own name) is
+  recognised: the app compares its SHA-256 with the release, shows the board
+  and Ubuntu version, and reads the drive back against the release after
+  writing. If the file differs from the release it is refused; download it
+  again.
+- Any other file is written as it is. The app cannot know whether it is
+  good, and says that it is not a Roxora release image. After writing, the
+  drive is read back and compared with the file.
+
+For a board's SPI NOR flash (Maskrom) use the release's SPI bootloader. A
+file from this computer is accepted there only if it can be a bootloader:
+not larger than the SPI flash, and not a disk image.

@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- New: an image file on this computer can be written to an SD card or USB
+  drive ("Use an image file on this computer" on the Board and Image steps,
+  or drop the file on the window): .img, .img.xz, .img.gz, .img.bz2. A file
+  with the name of an image in the Roxora releases is checked against that
+  release's SHA-256 and written without a download. Any other file is
+  written as a custom image: the app says that no release vouches for it,
+  reads it once to take the SHA-256 of its decompressed data, and compares
+  the drive with that after writing. Zip archives are not taken, and the
+  app does not yet open when an image file is double-clicked.
+- Maskrom, SPI NOR flash: a file that cannot be a bootloader is refused
+  when it is chosen instead of after the board is connected: one larger
+  than the board's SPI flash (16 MiB on the ROCK 4D; 32 MiB where the size
+  is not known), and a whole disk image (the name of a release image, or a
+  partition table that reaches past the flash). The message points to the
+  release's SPI bootloader and to writing the image to an SD card.
 - macOS: SD cards and USB drives are now written through Apple's `authopen`,
   as Raspberry Pi Imager and Armbian Imager do, instead of a writer running
   as root. With 0.1.2 a card on a Mac could keep its old contents from 17 MiB

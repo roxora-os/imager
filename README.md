@@ -11,6 +11,22 @@ images in two ways:
 - **Board storage over USB (Maskrom).** Writes a board's eMMC or SPI NOR
   flash through its USB-C port, with the same read-back check.
 
+An image you have already downloaded can be written to an SD card or USB
+drive too: **Use an image file on this computer** on the first two steps, or
+drop the file on the window (.img, .img.xz, .img.gz, .img.bz2).
+
+- A file with the name of an image in the Roxora releases must be that
+  image: its SHA-256 is compared with the release, and it is then written
+  and read back like a downloaded one.
+- Any other file is a custom image. No release vouches for it and the app
+  says so. It is read once to take the SHA-256 of its decompressed data,
+  written as it is, and the drive is read back and compared with that.
+
+SPI NOR flash takes a bootloader only. A file that is larger than the
+board's SPI flash, or that is a whole disk image (the name of a release
+image, or a partition table reaching past the flash), is refused when it is
+chosen, before the board is connected.
+
 The same page also runs in the browser, Maskrom only, at
 https://roxora-os.github.io/imager/ (Chrome, Edge or another browser with
 WebUSB). A browser cannot open a disk, so it cannot write an SD card in the
@@ -90,7 +106,8 @@ Safety rules:
 - The review page says exactly what will be erased, and writing needs a
   second confirmation.
 - Every write is read back and its SHA-256 compared with the release's
-  `extract_sha256`.
+  `extract_sha256`, or for a custom image file with the SHA-256 of the
+  file's own decompressed data.
 - A Maskrom write names the storage (eMMC or SPI NOR) and fails before
   writing anything if the board does not switch to it or the image does not
   fit.
@@ -115,7 +132,7 @@ entries are marked as samples and cannot be written.
 ## Tests
 
 ```sh
-npm test                                   # catalog, targets, Maskrom through the WASM, download proxy
+npm test                                   # catalog, targets, local image files, SPI file checks, Maskrom through the WASM, download proxy
 node scripts/electron-maskrom-e2e.mjs      # Maskrom path inside Electron
 node test/e2e/sd-loop.mjs                  # SD write to a loop device (Linux, sudo)
 node test/e2e/sd-ramdisk-mac.mjs           # SD write through authopen to a RAM disk (macOS, sudo; changes the authorization database, meant for CI)
