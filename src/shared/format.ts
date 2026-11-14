@@ -10,7 +10,3 @@ export function formatBytes(n: number): string {
   }
   return i === 0 ? `${n} bytes` : `${v.toFixed(1)} ${units[i]}`;
 }
-
-export function statusWords(status: string): string {
-  return status === 'hardware-tested' ? 'Tested on hardware' : 'Built and checked in CI, not yet booted on hardware';
-}

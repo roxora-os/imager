@@ -14,7 +14,7 @@ import { CogIcon } from '@patternfly/react-icons/dist/esm/icons/cog-icon';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import { flavorWords, groupByBoard, type Board, type CatalogImage } from '../shared/catalog';
 import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../shared/boardsearch';
-import { formatBytes, statusWords } from '../shared/format';
+import { formatBytes } from '../shared/format';
 import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile } from '../shared/ipc';
 import type { HiddenDrive, Target } from '../shared/targets';
 import type { UpdateCheck, UpdateOffer, UpdateResult } from '../shared/update';
@@ -66,7 +66,7 @@ function defaultSource(m: ReturnType<typeof maskromBoard>, img: CatalogImage | u
 }
 
 function releaseWords(img: CatalogImage): string {
-  return img.releaseInfo.prerelease ? `Pre-release ${img.releaseInfo.version}` : `Release ${img.releaseInfo.version}`;
+  return img.releaseInfo.prerelease ? `Beta ${img.releaseInfo.version}` : `Release ${img.releaseInfo.version}`;
 }
 
 /*
@@ -307,7 +307,7 @@ function BoardPicker({ boards, board, setBoard, find }: {
                     <Td select={{ rowIndex: i, variant: 'radio', isSelected: board === b.board, onSelect: () => setBoard(b.board) }} />
                     <Td dataLabel="Board" className="nowrap-md">{b.boardName}</Td>
                     <Td dataLabel="SoC" className="nowrap-md">{b.soc.toUpperCase()}</Td>
-                    <Td dataLabel="Newest image">{releaseWords(b.images[0])}, {b.images[0].status === 'hardware-tested' ? 'tested on hardware' : 'not yet tested on hardware'}</Td>
+                    <Td dataLabel="Newest image">{releaseWords(b.images[0])}</Td>
                   </Tr>
                 ))}
               </Tbody>
@@ -333,7 +333,7 @@ function ImageStep({ board, imageId, setImage, lp }: {
       : 'No board is chosen, so no release images are listed.'}>
       {board && (
         <Table aria-label="Images" variant="compact">
-          <Thead><Tr><Th screenReaderText="Select" /><Th>Release</Th><Th>Ubuntu</Th><Th>Kernel</Th><Th>Download</Th><Th>Status</Th></Tr></Thead>
+          <Thead><Tr><Th screenReaderText="Select" /><Th>Release</Th><Th>Ubuntu</Th><Th>Kernel</Th><Th>Download</Th></Tr></Thead>
           <Tbody>
             {board.images.map((img, i) => (
               <Tr key={img.id} isClickable onRowClick={() => setImage(img.id)} isRowSelected={selected === img.id}>
@@ -342,7 +342,6 @@ function ImageStep({ board, imageId, setImage, lp }: {
                 <Td dataLabel="Ubuntu">{img.ubuntuVersion} ({img.release})<div className="muted">{flavorWords(img.flavor)}</div></Td>
                 <Td dataLabel="Kernel">{img.kernel ? `${img.kernel} ` : ''}{img.branch}</Td>
                 <Td dataLabel="Download">{formatBytes(img.size)}</Td>
-                <Td dataLabel="Status">{img.status === 'hardware-tested' ? 'Tested on hardware' : 'CI only'}</Td>
               </Tr>
             ))}
           </Tbody>
@@ -350,8 +349,8 @@ function ImageStep({ board, imageId, setImage, lp }: {
       )}
       {sel && (
         <Content component="p" className="step-lead">
-          {statusWords(sel.status)}. {sel.releaseInfo.prerelease
-            ? 'Pre-releases have not been through the full hardware test.' : ''}{' '}
+          {sel.releaseInfo.prerelease
+            ? 'A beta: the newest release is the safer choice. ' : ''}
           <Button variant="link" isInline component="a" href={sel.releaseInfo.url} target="_blank">Release notes</Button>
         </Content>
       )}
@@ -1169,7 +1168,7 @@ export function App() {
                 {!custom && (method === 'sd' || source === 'release') && image && (
                   <>
                     <DescriptionListGroup><DescriptionListTerm>Image</DescriptionListTerm><DescriptionListDescription>{image.file}</DescriptionListDescription></DescriptionListGroup>
-                    <DescriptionListGroup><DescriptionListTerm>Release</DescriptionListTerm><DescriptionListDescription>{releaseWords(image)}, {image.releaseInfo.date}. {statusWords(image.status)}.</DescriptionListDescription></DescriptionListGroup>
+                    <DescriptionListGroup><DescriptionListTerm>Release</DescriptionListTerm><DescriptionListDescription>{releaseWords(image)}, {image.releaseInfo.date}</DescriptionListDescription></DescriptionListGroup>
                   </>
                 )}
                 {method === 'sd' && local?.imageId && (
