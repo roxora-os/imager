@@ -12,15 +12,21 @@
 # - Any other Linux, or without sudo: the AppImage, in ~/.local/bin with a
 #   launcher menu entry.
 #
+# It installs the newest normal release. BETA=1 takes the newest version
+# including betas (pre-releases on GitHub):
+#   curl -fsSL .../install.sh | BETA=1 sh
+# While there is no normal release yet, the newest beta is installed and the
+# script says so.
+#
 # The download is checked against the SHA-256 digest GitHub publishes for
 # the release asset. PACKAGE=appimage|deb|rpm overrides the choice on Linux;
 # INSTALL_DIR overrides where the .app or AppImage goes.
 set -eu
 
 REPO="roxora-os/imager"
-# The newest release, pre-releases included: releases/latest skips
-# pre-releases, and every Roxora Imager release so far is one.
-API="https://api.github.com/repos/$REPO/releases?per_page=1"
+# releases/latest is the newest normal release (GitHub leaves pre-releases
+# and drafts out of it); the list has the betas too, newest first.
+API="https://api.github.com/repos/$REPO/releases"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -62,16 +68,28 @@ case "$kind/$arch" in
   *) die "unknown PACKAGE=$kind (use appimage, deb or rpm)" ;;
 esac
 
+fetch() { curl -fsSL -H "Accept: application/vnd.github+json" "$1" -o "$tmp/release.json" 2>/dev/null; }
+beta=${BETA:-}
 say "Looking up the newest release..."
-curl -fsSL -H "Accept: application/vnd.github+json" "$API" -o "$tmp/release.json" \
-  || die "couldn't reach GitHub, or there is no release yet"
+if [ -z "$beta" ] && ! fetch "$API/latest"; then
+  say "There is no normal release yet: taking the newest beta version."
+  beta=fallback
+fi
+if [ -n "$beta" ]; then
+  fetch "$API?per_page=10" || die "couldn't reach GitHub, or there is no release yet"
+fi
 
-# One field per line, then pick the asset whose name matches; its digest and
-# download URL follow its name in GitHub's JSON.
-tr ',{}' '\n\n\n' < "$tmp/release.json" | sed 's/^ *//' > "$tmp/fields"
+# One field per line. In GitHub's JSON each release starts its own fields
+# with "tag_name"; keep those of the first release that is not a draft.
+# Within it, an asset's digest and download URL follow its name.
+tr ',{}' '\n\n\n' < "$tmp/release.json" | sed 's/^ *//' > "$tmp/fields.all"
+pick=$(awk '/^"tag_name":/ {n++} /^"draft": *false/ && n {print n; exit}' "$tmp/fields.all")
+[ -n "$pick" ] || die "found no release on GitHub"
+awk -v p="$pick" '/^"tag_name":/ {n++} n == p' "$tmp/fields.all" > "$tmp/fields"
 tag=$(sed -n 's/^"tag_name": *"\([^"]*\)".*/\1/p' "$tmp/fields" | head -1)
 name=$(sed -n 's/^"name": *"\([^"]*\)".*/\1/p' "$tmp/fields" | grep -E -e "$pattern" | head -1)
 [ -n "$name" ] || die "release $tag has no package for $os $arch"
+if grep -q '^"prerelease": *true' "$tmp/fields"; then say "$tag is a beta version (a pre-release)."; fi
 digest=$(awk -v n="\"name\": \"$name\"" '$0 == n {hit=1} hit && /^"digest":/ {print; exit}' "$tmp/fields" \
   | sed 's/.*"sha256:\([0-9a-f]*\)".*/\1/')
 url=$(awk -v n="\"name\": \"$name\"" '$0 == n {hit=1} hit && /^"browser_download_url":/ {print; exit}' "$tmp/fields" \
