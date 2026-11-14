@@ -20,10 +20,11 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { Transform, type Readable } from 'node:stream';
+import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { isOfferedTarget, type DriveInfo } from '../shared/targets';
 import type { HelperOutcome } from './elevate';
+import { openImage, type ImageSource } from './image-source';
 
 /** Exit statuses of roxora-imager-rawdisk (rawdisk.c). */
 export const RAWDISK_EXIT = { ok: 0, args: 2, auth: 3, open: 4, write: 5, read: 6, input: 7, small: 8 } as const;
@@ -109,24 +110,6 @@ export function exactly(size: number, onBytes: (total: number) => void): Transfo
       cb(total < size ? new Error(`the image ended after ${total} of ${size} bytes`) : null);
     },
   });
-}
-
-export interface ImageSource {
-  stream: Readable;
-  close: () => Promise<void>;
-}
-
-/** The decompressed image, through etcher-sdk's decompressors as in images.ts. */
-async function openImage(path: string): Promise<ImageSource> {
-  // Not the index: it loads etcher-sdk's USB boot scanners (see write-helper.ts).
-  // require(), not import(): the bundle is CommonJS, esbuild leaves import()
-  // of a module outside the bundle as it is, and Node.js then refuses the
-  // folder name (ERR_UNSUPPORTED_DIR_IMPORT).
-  const sourceDestination = require('etcher-sdk/build/source-destination') as typeof import('etcher-sdk/build/source-destination');
-  const file = new sourceDestination.File({ path });
-  const inner = await file.getInnerSource();
-  const stream = await inner.createReadStream() as unknown as Readable;
-  return { stream, close: () => inner.close().catch(() => {}) };
 }
 
 async function listDrives(): Promise<DriveInfo[]> {

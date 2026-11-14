@@ -5,7 +5,6 @@
 import { net } from 'electron';
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, createWriteStream, existsSync, mkdirSync, renameSync, rmSync, statSync } from 'node:fs';
-import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -65,22 +64,7 @@ export async function fetchImage(img: ReleaseFile, cacheDir: string, progress: P
   return dest;
 }
 
-export type Compression = 'xz' | 'gzip' | 'bzip2' | null;
-
-/** By content, not by name (RKDevelopTool-GUI's detect_compression does the same). */
-export async function detectCompression(path: string): Promise<Compression> {
-  const fh = await open(path, 'r');
-  try {
-    const b = Buffer.alloc(6);
-    await fh.read(b, 0, 6, 0);
-    if (b.equals(Buffer.from([0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00]))) return 'xz';
-    if (b[0] === 0x1f && b[1] === 0x8b) return 'gzip';
-    if (b.subarray(0, 3).toString('latin1') === 'BZh') return 'bzip2';
-    return null;
-  } finally {
-    await fh.close();
-  }
-}
+export { detectCompression, type Compression } from './image-source';
 
 /**
  * Decompress to a plain image next to the cache, hashing as it goes.
