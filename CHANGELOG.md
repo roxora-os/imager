@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Roxora's colours, as on the website: a mint-tinted page in the light
+  theme and the mark's near-black and deep greens in the dark theme, links
+  and selections in Roxora green, and primary buttons in the mark's bright
+  green with dark text. Status colours stay PatternFly's. Every text colour
+  meets WCAG AA contrast.
+
 ## 0.1.4
 
 The first normal release; earlier versions were pre-releases.

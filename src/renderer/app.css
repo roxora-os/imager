@@ -2,6 +2,84 @@
    Stack, Flex and Form; what is here is only what PatternFly has no option for. */
 html, body, #root { height: 100%; }
 
+/* Roxora's colours in place of PatternFly's blue and grey, the same as the
+   website's (roxora-os.github.io, assets/site.css). Only palette
+   steps that PatternFly's semantic tokens point at are replaced, so every
+   component follows; status colours (warning, danger, success, info) stay
+   PatternFly's. The colours come from the mark: #5FD4A8, #2E7A68, #1F4740
+   and the near-black #12171A. Contrast as WCAG 2 computes it:
+
+   Light theme
+     page ground #EEF4F1 (mint grey), cards white; borders tinted to match.
+     links and brand UI (radios, selected toggles, nav bar) #2E7A68:
+       5.12:1 on white, 4.60:1 on the page ground; hover #1F5F50 7.47:1.
+     primary buttons: bright #5FD4A8 with #12171A text,
+       9.86:1 (hover #7ADDB7 11.05:1, pressed #4FC79A 8.57:1).
+   Dark theme
+     page ground #12171A, cards #1C2527, hover #263133; borders tinted.
+     links, brand UI, primary buttons #5FD4A8: 9.86:1 on the ground,
+       8.54:1 on a card; button text #12171A 9.86:1; hover #8FE2C3. */
+:root {
+  --pf-t--global--color--brand--100: #3a957e;
+  --pf-t--global--color--brand--200: #2e7a68;
+  --pf-t--global--color--brand--300: #1f5f50;
+  --pf-t--global--color--brand--400: #1f4740;
+  --pf-t--global--color--brand--500: #163530;
+  --pf-t--global--color--brand--subtle--100: #e3f4ee;
+  --pf-t--global--color--brand--subtle--200: #c2e9da;
+  --pf-t--global--color--brand--subtle--300: #3a957e;
+  --pf-t--global--color--brand--subtle--400: #2e7a68;
+  --pf-t--global--focus-ring--color--100: #2e7a68;
+  --pf-t--global--focus-ring--color--200: #1f5f50;
+  --pf-t--global--text--color--link--100: #2e7a68;
+  --pf-t--global--text--color--link--200: #1f5f50;
+  --pf-t--global--text--color--link--250: #1f4740;
+  --pf-t--global--background--color--200: #eef4f1;
+  --pf-t--global--background--color--300: #dce8e3;
+  --pf-t--global--border--color--50: #d3e0db;
+  --pf-t--global--border--color--100: #bccec7;
+  --pf-t--global--border--color--200: #9db3ab;
+  --pf-t--global--border--color--300: #85a098;
+  --pf-t--global--border--color--400: #4d6660;
+
+  --pf-t--global--dark--color--brand--100: #5fd4a8;
+  --pf-t--global--dark--color--brand--200: #8fe2c3;
+  --pf-t--global--dark--color--brand--300: #c4f0df;
+  --pf-t--global--dark--color--brand--subtle--100: #1f4740;
+  --pf-t--global--dark--color--brand--subtle--200: #2e7a68;
+  --pf-t--global--dark--color--brand--subtle--300: #5fd4a8;
+  --pf-t--global--dark--focus-ring--color--100: #5fd4a8;
+  --pf-t--global--dark--text--color--link--100: #5fd4a8;
+  --pf-t--global--dark--text--color--link--200: #8fe2c3;
+  --pf-t--global--dark--background--color--100: #12171a;
+  --pf-t--global--dark--background--color--200: #1c2527;
+  --pf-t--global--dark--background--color--300: #263133;
+  --pf-t--global--dark--border--color--50: #2e3b3a;
+  --pf-t--global--dark--border--color--100: #3e504c;
+  --pf-t--global--dark--border--color--200: #8fa39d;
+  --pf-t--global--dark--border--color--300: #b9c8c3;
+
+  /* The bright green, for what should catch the eye first. */
+  --roxora-accent: #5fd4a8;
+  --roxora-accent--hover: #7addb7;
+  --roxora-accent--clicked: #4fc79a;
+  --roxora-on-accent: #12171a;
+}
+:root.pf-v6-theme-dark {
+  --roxora-accent--hover: #8fe2c3;
+  --roxora-accent--clicked: #c4f0df;
+}
+/* Primary buttons take the bright green with near-black text in both
+   themes, at every size. */
+.pf-v6-c-button, .pf-v6-c-button.pf-m-display-lg {
+  --pf-v6-c-button--m-primary--BackgroundColor: var(--roxora-accent);
+  --pf-v6-c-button--m-primary--Color: var(--roxora-on-accent);
+  --pf-v6-c-button--m-primary--hover--BackgroundColor: var(--roxora-accent--hover);
+  --pf-v6-c-button--m-primary--hover--Color: var(--roxora-on-accent);
+  --pf-v6-c-button--m-primary--m-clicked--BackgroundColor: var(--roxora-accent--clicked);
+  --pf-v6-c-button--m-primary--m-clicked--Color: var(--roxora-on-accent);
+}
+
 /* Masthead: the mark at its own size beside the name (PatternFly sizes the
    logo slot for a wide wordmark). */
 .pf-v6-c-masthead__logo { --pf-v6-c-masthead__logo--Width: auto; }
