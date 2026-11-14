@@ -90,7 +90,8 @@ export async function detectCompression(path: string): Promise<Compression> {
 export async function decompress(path: string, outDir: string, progress: Progress, signal?: AbortSignal, expected?: number):
   Promise<{ path: string; size: number; sha256: string }> {
   // Not the index: it loads etcher-sdk's USB boot scanners (see write-helper.ts).
-  const sourceDestination = await import('etcher-sdk/build/source-destination');
+  // require(), not import(): see openImage() in mac-write.ts.
+  const sourceDestination = require('etcher-sdk/build/source-destination') as typeof import('etcher-sdk/build/source-destination');
   mkdirSync(outDir, { recursive: true });
   const out = join(outDir, `maskrom-${randomBytes(6).toString('hex')}.img`);
   const file = new sourceDestination.File({ path });
