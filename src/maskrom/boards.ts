@@ -40,6 +40,8 @@ export interface MaskromBoard {
   imageNote?: string;
   /** Loader sent with "db"; a file in resources/. */
   loader: string;
+  /** Size of the board's SPI NOR flash in bytes, where it has one and the size is known. */
+  spiFlashSize?: number;
 }
 
 export const MASKROM_BOARDS: MaskromBoard[] = [
@@ -50,6 +52,7 @@ export const MASKROM_BOARDS: MaskromBoard[] = [
   {
     board: 'radxa-rock-4d', boardName: 'Radxa ROCK 4D', soc: 'rk3576',
     storages: ['spinor', 'sd'], imageStorage: null, wholeImage: ['sd'], loader: 'rk3576_spl_loader.bin',
+    spiFlashSize: 16 * 1024 * 1024,
     imageNote: 'SPI NOR flash is too small for a Roxora image; it takes the bootloader. '
       + 'Choose the SD card in the board for the whole image.',
   },
