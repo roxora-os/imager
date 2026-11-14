@@ -5,7 +5,8 @@
 // scripts/build-writer.mjs). The writer is one pkg binary, so it is searched
 // for the paths those files would have inside it.
 // With an architecture it also checks that every native addon (.node) and
-// the writer are built for that CPU.
+// the writer (on macOS roxora-imager-rawdisk, which must be there) are built
+// for that CPU.
 //   node scripts/check-package.mjs <unpacked app dir or .app/Contents/Resources dir> [x64|arm64]
 import { listPackage } from '@electron/asar';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -39,13 +40,16 @@ const icon = files.filter((f) => /resources[\\/]icons[\\/]png[\\/]roxora-imager-
 console.log(`${files.length} files in ${root}`);
 for (const f of files.filter((x) => /icon|\.icns$|\.ico$/i.test(x))) console.log(`  icon file: ${f}`);
 if (arch) {
-  const native = files.filter((f) => !f.includes('app.asar/') && (/\.node$/.test(f) || /roxora-imager-writer(\.exe)?$/.test(f)));
+  const native = files.filter((f) => !f.includes('app.asar/') && (/\.node$/.test(f) || /roxora-imager-(writer(\.exe)?|rawdisk)$/.test(f)));
   const wrong = [];
   for (const f of native) {
     const m = machines(join(root, f));
     if (!m.includes(arch)) wrong.push(`${f} (${m.join('+') || 'not a native binary'})`);
   }
   console.log(`  ${native.length} native binaries checked for ${arch}`);
+  if (process.platform === 'darwin' && !native.some((f) => /roxora-imager-rawdisk$/.test(f))) {
+    console.log('FAIL: writer/roxora-imager-rawdisk is missing (scripts/build-writer.mjs)'); process.exit(1);
+  }
   if (wrong.length) { console.log(`FAIL: not built for ${arch}:\n  ${wrong.join('\n  ')}`); process.exit(1); }
 }
 if (blob.length) { console.log(`FAIL: firmware blobs in the package:\n  ${blob.join('\n  ')}`); process.exit(1); }

@@ -199,7 +199,7 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      - name: Writer (Node.js packed with pkg, as Etcher's etcher-util)
+      - name: Raw disk helper (C, opens the disk through authopen)
         run: npm run writer
       - uses: actions/download-artifact@v4
         with:

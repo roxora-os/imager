@@ -1,13 +1,29 @@
-// Build the SD/USB writer as a standalone executable (build-res/writer/),
-// the way Etcher builds etcher-util: the helper and etcher-sdk bundled into
-// one file, packed with @yao-pkg/pkg into a plain Node.js binary, the native
-// addons as assets. It cannot run inside Electron's own Node: Electron's V8
-// memory cage aborts on the external buffers @ronomon/direct-io allocates for
+// Build what writes SD cards and USB drives, into build-res/writer/.
+//
+// macOS: roxora-imager-rawdisk, a small C program that has Apple's authopen
+// open the raw disk (src/helper/macos/rawdisk.c, src/main/mac-write.ts),
+// for both CPUs in one file. The etcher-sdk writer below is not used there.
+//
+// Linux and Windows: the writer as a standalone executable, the way Etcher
+// builds etcher-util: the helper and etcher-sdk bundled into one file,
+// packed with @yao-pkg/pkg into a plain Node.js binary, the native addons as
+// assets. It cannot run inside Electron's own Node: Electron's V8 memory
+// cage aborts on the external buffers @ronomon/direct-io allocates for
 // O_DIRECT writes.
 //   node scripts/build-writer.mjs [node22-linux-x64]
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, rmSync } from 'node:fs';
+
+if (process.platform === 'darwin') {
+  rmSync('build-res/writer', { recursive: true, force: true });
+  mkdirSync('build-res/writer', { recursive: true });
+  execFileSync('cc', ['-O2', '-Wall', '-Wextra', '-Werror', '-arch', 'arm64', '-arch', 'x86_64',
+    '-mmacosx-version-min=11.0', '-framework', 'Security',
+    '-o', 'build-res/writer/roxora-imager-rawdisk', 'src/helper/macos/rawdisk.c'], { stdio: 'inherit' });
+  console.log('writer: build-res/writer/roxora-imager-rawdisk (arm64 and x86_64)');
+  process.exit(0);
+}
 
 const plat = { linux: 'linux', darwin: 'macos', win32: 'win' }[process.platform];
 const target = process.argv[2] ?? `node22-${plat}-${process.arch}`;
