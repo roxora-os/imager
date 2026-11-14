@@ -23,8 +23,9 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/')
     steps:
       - uses: actions/checkout@v4
-      # The in-app update check compares the latest tag with the app's
-      # version, so they must agree.
+      # The in-app update check compares the release tags with the app's
+      # version, so they must agree, suffix included: package.json
+      # 0.1.5-beta.1 goes with the tag v0.1.5-beta.1.
       - run: |
           v=$(node -p "require('./package.json').version")
           [ "$v" = "${GITHUB_REF_NAME#v}" ] || { echo "tag $GITHUB_REF_NAME does not match package.json $v"; exit 1; }
@@ -329,12 +330,12 @@ jobs:
           find artifacts -path artifacts/rkdeveloptool-wasm -prune -o -type f -exec cp {} out/ \;
           (cd out && sha256sum -- * > SHA256SUMS)
           cat out/SHA256SUMS
-      # A pre-release until it has passed the hardware test (part C of
-      # roxora-os/build docs/hardware-test.md); then marked as a release by
-      # hand. The update check reads releases/latest, which skips
-      # pre-releases, so nobody is offered one as an update.
+      # The tag decides: vX.Y.Z is a normal release, which the app and
+      # install.sh offer to everyone; a tag with a suffix (vX.Y.Z-beta.N) is
+      # a beta, published as a pre-release and offered only to those who
+      # asked for betas.
       - uses: softprops/action-gh-release@v2
         with:
           files: out/*
           body_path: release-notes.md
-          prerelease: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
