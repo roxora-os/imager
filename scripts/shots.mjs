@@ -112,7 +112,11 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
   if (await page.isDisabled('button:has-text("Erase and write")')) throw new Error('a custom image cannot be written from the review');
   await shot('4-review-custom');
   // A release image chosen after all: the custom file goes.
-  await page.click('.pf-v6-c-wizard__nav button:has-text("Board")');
+  // With Back: the step list is folded away in a narrow window.
+  for (const step of ['Destination', 'Image', 'Board']) {
+    await page.click('.pf-v6-c-wizard__footer button:has-text("Back")');
+    await page.waitForSelector(`h2:has-text("${step}")`);
+  }
   await page.fill('.board-search input', 'rock4d');
   await page.press('.board-search input', 'Enter');
   await page.click('.pf-v6-c-wizard__footer button:has-text("Next")');
