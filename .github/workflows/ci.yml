@@ -18,6 +18,8 @@ jobs:
     name: Tests, Maskrom in Electron, screenshots
     needs: wasm
     runs-on: ubuntu-24.04
+    # A test that never ends must not hold a runner for six hours.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -75,6 +77,7 @@ jobs:
     name: SD write to a loop device
     needs: wasm
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

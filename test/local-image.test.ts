@@ -82,7 +82,8 @@ describe('the checksum of a custom image', () => {
   });
   it('stops when cancelled', async () => {
     const ac = new AbortController();
-    const endless = new Readable({ read() { this.push(Buffer.alloc(1024)); } });
+    // One piece per turn of the event loop, so the timer below can fire.
+    const endless = new Readable({ read() { setImmediate(() => this.push(Buffer.alloc(1024))); } });
     setTimeout(() => ac.abort(), 50);
     await expect(measureImage({ stream: endless, close: async () => {} }, () => {}, ac.signal)).rejects.toThrow();
   });
