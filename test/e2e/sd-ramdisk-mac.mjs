@@ -22,7 +22,11 @@
 //      refused, and no helper is started for them;
 //   5. a disk smaller than the image is refused by the helper;
 //   6. cancelling during the write stops the helper;
-//   7. without the granted right nothing is written (the dialog cannot be
+//   7. image files from this computer that are in no release (.img.xz,
+//      .img.gz and plain .img): looked at and measured as the app does it
+//      (src/main/local-image.ts), written with the size and SHA-256 that
+//      gave, and the disk then holds exactly the image;
+//   8. without the granted right nothing is written (the dialog cannot be
 //      answered here; the write is cancelled after 15 seconds).
 import { build } from 'esbuild';
 import { execFileSync } from 'node:child_process';
@@ -40,6 +44,9 @@ const bundle = join(root, 'build/e2e/mac-write.cjs');
 await build({ entryPoints: ['src/main/mac-write.ts'], bundle: true, platform: 'node', format: 'cjs',
   external: ['etcher-sdk', 'drivelist'], outfile: bundle, logLevel: 'warning' });
 const { macWrite } = createRequire(import.meta.url)(bundle);
+await build({ entryPoints: ['src/main/local-image.ts'], bundle: true, platform: 'node', format: 'cjs',
+  external: ['etcher-sdk'], outfile: join(root, 'build/e2e/local-image.cjs'), logLevel: 'warning' });
+const { describeLocal, measureFile } = createRequire(import.meta.url)(join(root, 'build/e2e/local-image.cjs'));
 
 const helperPath = join(root, 'build-res/writer/roxora-imager-rawdisk');
 const BIG = { maxBuffer: 512 * 1024 * 1024 };
@@ -143,6 +150,26 @@ try {
   let running = '';
   try { running = sh('pgrep', ['-f', 'roxora-imager-rawdisk']); } catch { /* none */ }
   check(running === '', 'no helper is left running after the cancel');
+
+  // Custom images: nothing to compare with but the file itself.
+  for (const kind of ['xz', 'gz', 'img']) {
+    const custom = randomBytes(24 * MIB + 100 + kind.length);
+    const plain = join(work, `custom-${kind}.img`);
+    writeFileSync(plain, custom);
+    if (kind === 'xz') sh('xz', ['-T0', '-1', '-k', plain]);
+    if (kind === 'gz') sh('gzip', ['-1', '-k', plain]);
+    const path = kind === 'img' ? plain : `${plain}.${kind}`;
+    const desc = await describeLocal(path, []);
+    const wantSize = kind === 'gz' ? 0 : custom.length;
+    check(desc.image === null && desc.extractSize === wantSize && desc.compression === { xz: 'xz', gz: 'gzip', img: null }[kind],
+      `custom .${kind}: taken as a custom image, size before reading ${desc.extractSize}`);
+    const m = await measureFile(path, () => {});
+    check(m.size === custom.length && m.sha256 === sha256(custom), `custom .${kind}: measured size and SHA-256 are those of the image`);
+    fill(big);
+    const w = await write(big, { image: path, extractSize: m.size, extractSha256: m.sha256 });
+    check(w.out.ok === true && w.out.sha256 === sha256(custom), `custom .${kind}: write and read-back match`);
+    check(firstDifference(contents(big).subarray(0, custom.length), custom) === -1, `custom .${kind}: disk holds exactly the image`);
+  }
 
   revoke(big);
   fill(big);

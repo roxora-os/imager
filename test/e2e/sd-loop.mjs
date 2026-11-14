@@ -9,11 +9,16 @@
 //   2. the bytes on the device equal the image;
 //   3. a wrong extract_sha256 is reported as a read-back mismatch;
 //   4. the disk holding / is refused, and its first MiB is unchanged;
-//   5. a loop device is refused when the test switch is off.
+//   5. a loop device is refused when the test switch is off;
+//   6. image files from this computer that are in no release (.img.xz,
+//      .img.gz and plain .img): looked at and measured as the app does it
+//      (src/main/local-image.ts), written with the size and SHA-256 that
+//      gave, and the device then holds exactly the image.
 import { build } from 'esbuild';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
@@ -21,6 +26,11 @@ const root = resolve('.');
 const work = mkdtempSync(join(tmpdir(), 'sd-e2e-'));
 await build({ entryPoints: ['src/main/elevate.ts'], bundle: true, platform: 'node', format: 'esm', outfile: join(work, 'elevate.mjs'), logLevel: 'warning' });
 const { helperLaunch, runHelper } = await import(join(work, 'elevate.mjs'));
+// Inside the checkout, so that etcher-sdk is found.
+mkdirSync(join(root, 'build/e2e'), { recursive: true });
+await build({ entryPoints: ['src/main/local-image.ts'], bundle: true, platform: 'node', format: 'cjs',
+  external: ['etcher-sdk'], outfile: join(root, 'build/e2e/local-image.cjs'), logLevel: 'warning' });
+const { describeLocal, measureFile } = createRequire(import.meta.url)(join(root, 'build/e2e/local-image.cjs'));
 
 const writerPath = join(root, 'build-res/writer/roxora-imager-writer');
 const BIG = { maxBuffer: 256 * 1024 * 1024 };
@@ -49,12 +59,12 @@ function elevateWith(extraEnv) {
   });
 }
 
-async function write(device, sha, extraEnv = { ROXORA_IMAGER_TEST: '1' }, allowLoop = true) {
+async function write(device, sha, extraEnv = { ROXORA_IMAGER_TEST: '1' }, allowLoop = true, image = xz, size = data.length) {
   const progress = [];
   const out = await runHelper({
     launch: (dir) => helperLaunch({ writerPath, dir }),
-    args: (socket, token) => ['--socket', socket, '--token', token, '--image', xz, '--device', device,
-      '--extract-size', String(data.length), '--extract-sha256', sha, ...(allowLoop ? ['--allow-loop'] : [])],
+    args: (socket, token) => ['--socket', socket, '--token', token, '--image', image, '--device', device,
+      '--extract-size', String(size), '--extract-sha256', sha, ...(allowLoop ? ['--allow-loop'] : [])],
     onMessage: (m) => { if (m.type === 'progress') progress.push(`${m.stage} ${m.percent}`); },
     elevate: elevateWith(extraEnv),
   });
@@ -86,6 +96,28 @@ try {
   const d = await write(loop, imgSha, {}, true);
   console.log(JSON.stringify(d.out));
   check(d.out.ok === false, 'a loop device is refused without the test switch');
+
+  // Custom images: nothing to compare with but the file itself.
+  const sha256 = (b) => createHash('sha256').update(b).digest('hex');
+  for (const kind of ['xz', 'gz', 'img']) {
+    const custom = randomBytes(24 * 1024 * 1024 + 512 * (kind.length + 1));
+    const plain = join(work, `custom-${kind}.img`);
+    writeFileSync(plain, custom);
+    if (kind === 'xz') sh('xz', ['-T0', '-1', '-k', plain]);
+    if (kind === 'gz') sh('gzip', ['-1', '-k', plain]);
+    const path = kind === 'img' ? plain : `${plain}.${kind}`;
+    const desc = await describeLocal(path, []);
+    const wantSize = kind === 'gz' ? 0 : custom.length;
+    check(desc.image === null && desc.extractSize === wantSize && desc.compression === { xz: 'xz', gz: 'gzip', img: null }[kind],
+      `custom .${kind}: taken as a custom image, size before reading ${desc.extractSize}`);
+    const m = await measureFile(path, () => {});
+    check(m.size === custom.length && m.sha256 === sha256(custom), `custom .${kind}: measured size and SHA-256 are those of the image`);
+    const w = await write(loop, m.sha256, { ROXORA_IMAGER_TEST: '1' }, true, path, m.size);
+    console.log(JSON.stringify(w.out));
+    check(w.out.ok === true && w.out.sha256 === sha256(custom), `custom .${kind}: write and read-back match`);
+    const got = execFileSync('sudo', ['head', '-c', String(custom.length), loop], BIG);
+    check(Buffer.compare(got, custom) === 0, `custom .${kind}: device holds exactly the image`);
+  }
 } finally {
   execFileSync('sudo', ['losetup', '-d', loop]);
   rmSync(work, { recursive: true, force: true });
