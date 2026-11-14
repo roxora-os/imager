@@ -1,6 +1,6 @@
-// The SD/USB writer. Runs as its own process with administrator rights
-// (pkexec, the macOS password prompt or UAC; see main/elevate.ts) because
-// writing a whole drive needs them. It talks to the app over a local socket
+// The SD/USB writer for Linux and Windows (macOS: main/mac-write.ts). Runs
+// as its own process with administrator rights (pkexec or UAC; see
+// main/elevate.ts) because writing a whole drive needs them. It talks to the app over a local socket
 // with one JSON object per line.
 //
 //   write-helper --socket PATH --token T --image FILE.img.xz --device DEV
@@ -79,23 +79,15 @@ async function readBackSha256(drive: drivelist.Drive, length: number,
 export async function runWrite(a: HelperArgs, send: (m: HelperMessage) => void): Promise<void> {
   const drives = await drivelist.list();
   let drive = drives.find((d) => d.device === a.device);
-  // Test devices (only with --allow-loop and ROXORA_IMAGER_TEST=1): a Linux
-  // loop device, or a macOS RAM disk from `hdiutil attach -nomount ram://N`.
-  const loop = a.allowLoop && (/^\/dev\/loop\d+$/.test(a.device)
-    || (process.platform === 'darwin' && /^\/dev\/disk\d+$/.test(a.device)));
+  const loop = a.allowLoop && /^\/dev\/loop\d+$/.test(a.device);
   if (loop && !drive) {
-    // drivelist does not always list test devices; describe it ourselves.
+    // drivelist does not always list loop devices; describe it ourselves.
     const { statSync } = await import('node:fs');
     const { execFileSync } = await import('node:child_process');
     statSync(a.device);
-    const darwin = process.platform === 'darwin';
-    const size = darwin
-      ? Number(/<key>TotalSize<\/key>\s*<integer>(\d+)<\/integer>/.exec(
-        execFileSync('diskutil', ['info', '-plist', a.device]).toString())?.[1])
-      : Number(execFileSync('blockdev', ['--getsize64', a.device]).toString().trim());
+    const size = Number(execFileSync('blockdev', ['--getsize64', a.device]).toString().trim());
     drive = {
-      device: a.device, displayName: a.device, description: 'test device', size,
-      raw: darwin ? a.device.replace('/dev/disk', '/dev/rdisk') : a.device,
+      device: a.device, displayName: a.device, description: 'loop device', size, raw: a.device,
       mountpoints: [], isReadOnly: false, isSystem: false, isVirtual: true, isRemovable: true,
       isCard: false, isUSB: false, isSCSI: false, isUAS: false, busType: 'VIRTUAL', busVersion: null,
       error: null, enumerator: 'test', blockSize: 512, logicalBlockSize: 512, devicePath: null,
@@ -121,7 +113,7 @@ export async function runWrite(a: HelperArgs, send: (m: HelperMessage) => void):
     verify: false, // checked below against the release, not against the source
     trim: false,
     decompressFirst: false,
-    numBuffers: a.allowLoop && process.env.ROXORA_IMAGER_NUM_BUFFERS ? Number(process.env.ROXORA_IMAGER_NUM_BUFFERS) : 16,
+    numBuffers: 16,
     onFail: (_d, e) => { failure = e; },
     onProgress: (p) => {
       const bytes = p.position ?? 0;

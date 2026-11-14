@@ -1,49 +1,80 @@
-// End-to-end SD write to a RAM disk, for CI on macOS (needs sudo).
+// End-to-end SD write on macOS, for CI (needs sudo for the setup only).
 //
-//   node test/e2e/sd-ramdisk-mac.mjs
+//   npm run writer && node test/e2e/sd-ramdisk-mac.mjs
 //
-// Runs the real writer the way the app starts it, with sudo instead of the
-// password dialog, against `hdiutil attach -nomount ram://N`. The disk is
-// zeroed before each write; after it, the read-back must match and the
-// bytes on the disk must equal the image. Written once with the app's
-// buffer count and once with 2, to tell a buffer problem from others.
+// Runs the app's macOS write path (src/main/mac-write.ts) with the real
+// roxora-imager-rawdisk and Apple's authopen against RAM disks from
+// `hdiutil attach -nomount ram://N`. Nothing in the path runs as root.
+//
+// A runner has nobody to answer the password dialog, so the test grants the
+// right the helper asks for, sys.openfile.readwrite./dev/rdiskN, in the
+// authorization database for the time of the test (and removes it again).
+// The device nodes are given to root:operator, mode 640, as those of a real
+// card are, so the user cannot open the disk without authopen.
+//
+// Checks:
+//   1. the user cannot open the raw disk directly;
+//   2. an .img.xz whose size is not a multiple of the block size is written,
+//      the read-back matches, the disk holds the image, the rest of its last
+//      block is zero and everything after it is untouched;
+//   3. a wrong extract_sha256 is reported as a read-back mismatch;
+//   4. a RAM disk is refused without the test switch, the system disks are
+//      refused, and no helper is started for them;
+//   5. a disk smaller than the image is refused by the helper;
+//   6. cancelling during the write stops the helper;
+//   7. without the granted right nothing is written (the dialog cannot be
+//      answered here; the write is cancelled after 15 seconds).
 import { build } from 'esbuild';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 const root = resolve('.');
 const work = mkdtempSync(join(tmpdir(), 'sd-mac-'));
-await build({ entryPoints: ['src/main/elevate.ts'], bundle: true, platform: 'node', format: 'esm', outfile: join(work, 'elevate.mjs'), logLevel: 'warning' });
-const { helperLaunch, runHelper } = await import(join(work, 'elevate.mjs'));
+// Inside the checkout, so that etcher-sdk and drivelist are found.
+mkdirSync(join(root, 'build/e2e'), { recursive: true });
+const bundle = join(root, 'build/e2e/mac-write.cjs');
+await build({ entryPoints: ['src/main/mac-write.ts'], bundle: true, platform: 'node', format: 'cjs',
+  external: ['etcher-sdk', 'drivelist'], outfile: bundle, logLevel: 'warning' });
+const { macWrite } = createRequire(import.meta.url)(bundle);
 
-const writerPath = join(root, 'build-res/writer/roxora-imager-writer');
+const helperPath = join(root, 'build-res/writer/roxora-imager-rawdisk');
 const BIG = { maxBuffer: 512 * 1024 * 1024 };
 const sh = (cmd, args) => execFileSync(cmd, args, BIG).toString().trim();
+const sha256 = (b) => createHash('sha256').update(b).digest('hex');
 let failures = 0;
 const check = (ok, what) => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${what}`); if (!ok) failures++; };
 
-// Larger than 17 MiB (where the SD card on a Mac stopped matching), odd size.
+const MIB = 1024 * 1024;
+const BLOCK = 512;
+const DISK_MIB = 192;
+// Larger than 17 MiB (where an SD card on a Mac stopped matching with the
+// old writer), and not a multiple of the block size.
 const img = join(work, 'test.img');
-const data = randomBytes(120 * 1024 * 1024 + 4096 * 3 + 512);
+const data = randomBytes(120 * MIB + 4096 * 3 + 517);
 writeFileSync(img, data);
-const imgSha = createHash('sha256').update(data).digest('hex');
+const imgSha = sha256(data);
 sh('xz', ['-T0', '-1', '-k', img]);
 const xz = `${img}.xz`;
+// What the disks hold before a write.
+const patternFile = join(work, 'pattern.bin');
+const pattern = Buffer.alloc(DISK_MIB * MIB, 0xa5);
+writeFileSync(patternFile, pattern);
 
-const disk = sh('hdiutil', ['attach', '-nomount', `ram://${(256 * 1024 * 1024) / 512}`]).split(/\s+/)[0];
-const rdisk = disk.replace('/dev/disk', '/dev/rdisk');
-console.log(`RAM disk ${disk}`);
-
-function elevate(extraEnv) {
-  return (cmd, env) => new Promise((resolveP, reject) => {
-    const vars = Object.entries({ ...env, ...extraEnv }).map(([k, v]) => `${k}=${v}`);
-    const p = spawn('sudo', ['env', ...vars, 'sh', '-c', cmd], { stdio: ['ignore', 'inherit', 'inherit'] });
-    p.on('exit', (c) => (c === 0 ? resolveP() : reject(new Error(`exit ${c}`))));
-  });
+function ramDisk(mib) {
+  const disk = sh('hdiutil', ['attach', '-nomount', `ram://${(mib * MIB) / BLOCK}`]).split(/\s+/)[0];
+  const rdisk = disk.replace('/dev/disk', '/dev/rdisk');
+  sh('sudo', ['chown', 'root:operator', disk, rdisk]);
+  sh('sudo', ['chmod', '640', disk, rdisk]);
+  return { disk, rdisk, mib, right: `sys.openfile.readwrite.${rdisk}` };
 }
+const grant = (d) => sh('sudo', ['security', 'authorizationdb', 'write', d.right, 'allow']);
+const revoke = (d) => { try { sh('sudo', ['security', 'authorizationdb', 'remove', d.right]); } catch { /* not there */ } };
+const fill = (d) => sh('sudo', ['dd', `if=${patternFile}`, `of=${d.rdisk}`, 'bs=1m', `count=${d.mib}`]);
+const contents = (d) => execFileSync('sudo', ['dd', `if=${d.rdisk}`, 'bs=1m'], { ...BIG, stdio: ['ignore', 'pipe', 'ignore'] });
 
 function firstDifference(a, b) {
   const n = Math.min(a.length, b.length);
@@ -51,32 +82,80 @@ function firstDifference(a, b) {
   return a.length === b.length ? -1 : n;
 }
 
-async function writeWith(numBuffers) {
-  sh('sudo', ['dd', 'if=/dev/zero', `of=${rdisk}`, 'bs=1m', 'count=256']);
-  const env = { ROXORA_IMAGER_TEST: '1', ...(numBuffers ? { ROXORA_IMAGER_NUM_BUFFERS: String(numBuffers) } : {}) };
+async function write(d, over = {}) {
+  const progress = [];
   const t0 = Date.now();
-  const out = await runHelper({
-    launch: (dir) => helperLaunch({ writerPath, dir }),
-    args: (socket, token) => ['--socket', socket, '--token', token, '--image', xz, '--device', disk,
-      '--extract-size', String(data.length), '--extract-sha256', imgSha, '--allow-loop'],
-    onMessage: () => {},
-    elevate: elevate(env),
+  const out = await macWrite({
+    image: xz, device: d.disk, extractSize: data.length, extractSha256: imgSha, helperPath, testDisk: true,
+    onProgress: (p) => { if (!progress.includes(p.stage)) progress.push(p.stage); },
+    ...over,
   });
-  const label = numBuffers ? `${numBuffers} buffers` : 'the app\'s buffers';
-  console.log(label, `${Date.now() - t0} ms`, JSON.stringify(out));
-  const onDisk = execFileSync('sudo', ['dd', `if=${rdisk}`, 'bs=1m', `count=${Math.ceil(data.length / 1048576)}`], { ...BIG, stdio: ['ignore', 'pipe', 'ignore'] })
-    .subarray(0, data.length);
-  const diff = firstDifference(onDisk, data);
-  console.log(`${label}: first difference at ${diff} (${(diff / 1048576).toFixed(2)} MiB)`);
-  check(out.ok === true && out.sha256 === imgSha, `${label}: write and read-back match`);
-  check(diff === -1, `${label}: disk holds exactly the image`);
+  console.log(`${Date.now() - t0} ms`, JSON.stringify(out));
+  return { out, progress };
 }
 
+const big = ramDisk(DISK_MIB);
+const small = ramDisk(64);
+console.log(`RAM disks ${big.disk} (${big.mib} MiB), ${small.disk} (${small.mib} MiB)`);
+console.log(sh('ls', ['-l', big.disk, big.rdisk]));
 try {
-  await writeWith(undefined);
-  await writeWith(2);
+  let direct = 'opened';
+  try { closeSync(openSync(big.rdisk, 'r+')); } catch (e) { direct = e.code; }
+  check(direct === 'EACCES', `the user cannot open ${big.rdisk} directly (${direct})`);
+
+  grant(big);
+  grant(small);
+  fill(big);
+  const a = await write(big);
+  check(a.out.ok === true && a.out.sha256 === imgSha, 'write and read-back match the release checksum');
+  check(a.progress.join() === 'write,verify', `progress reported for write and verify (${a.progress.join()})`);
+  const onDisk = contents(big);
+  const diff = firstDifference(onDisk.subarray(0, data.length), data);
+  check(diff === -1, `the disk holds exactly the image (first difference at ${diff})`);
+  const padEnd = Math.ceil(data.length / BLOCK) * BLOCK;
+  check(padEnd > data.length && onDisk.subarray(data.length, padEnd).every((b) => b === 0), `the last block is filled with zeros (${padEnd - data.length} bytes)`);
+  check(onDisk.length === DISK_MIB * MIB && onDisk.subarray(padEnd).every((b) => b === 0xa5), 'the disk after the image is untouched');
+
+  const b = await write(big, { extractSha256: '0'.repeat(64) });
+  check(b.out.ok === false && /does not read back/.test(b.out.reason), 'wrong checksum reported as a read-back mismatch');
+
+  // From here on a missing helper: a refusal must come before it is started.
+  fill(big);
+  const before = sha256(contents(big));
+  const c = await write(big, { testDisk: false, helperPath: join(work, 'not-started') });
+  check(c.out.ok === false && /not a drive the imager writes to|no longer connected/.test(c.out.reason) && sha256(contents(big)) === before,
+    'a RAM disk is refused without the test switch and unchanged');
+  const rootWhole = /<key>ParentWholeDisk<\/key>\s*<string>([^<]+)<\/string>/.exec(sh('diskutil', ['info', '-plist', '/']))?.[1];
+  for (const sys of new Set(['/dev/disk0', `/dev/${rootWhole}`])) {
+    const s = await write({ disk: sys }, { testDisk: false, helperPath: join(work, 'not-started') });
+    check(s.out.ok === false && /not a drive the imager writes to|no longer connected/.test(s.out.reason), `the system disk ${sys} is refused`);
+  }
+
+  fill(small);
+  const smallBefore = sha256(contents(small));
+  const e = await write(small);
+  check(e.out.ok === false && /smaller than the image/.test(e.out.reason) && sha256(contents(small)) === smallBefore,
+    'a disk smaller than the image is refused by the helper and unchanged');
+
+  const ac = new AbortController();
+  const f = await write(big, { signal: ac.signal, onProgress: (p) => { if (p.stage === 'write' && p.bytes >= 8 * MIB) ac.abort(); } });
+  check(f.out.ok === false && f.out.reason === 'Cancelled. The drive is only partly written.', 'cancelling during the write stops it and says the drive is partly written');
+  let running = '';
+  try { running = sh('pgrep', ['-f', 'roxora-imager-rawdisk']); } catch { /* none */ }
+  check(running === '', 'no helper is left running after the cancel');
+
+  revoke(big);
+  fill(big);
+  const ac2 = new AbortController();
+  const timer = setTimeout(() => ac2.abort(), 15000);
+  const g = await write(big, { signal: ac2.signal });
+  clearTimeout(timer);
+  check(g.out.ok === false && /Nothing was written/.test(g.out.reason) && sha256(contents(big)) === before,
+    `without the granted right nothing is written (${ac2.signal.aborted ? 'the dialog was not answered; cancelled' : 'refused'})`);
 } finally {
-  execFileSync('hdiutil', ['detach', disk]);
+  revoke(big);
+  revoke(small);
+  for (const d of [big, small]) { try { sh('hdiutil', ['detach', d.disk]); } catch (err) { console.log(String(err.message)); } }
   rmSync(work, { recursive: true, force: true });
 }
 console.log(failures ? `${failures} check(s) failed` : 'all checks passed');
