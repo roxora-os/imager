@@ -11,6 +11,7 @@ import { chmodSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { createServer, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
+import util from 'node:util';
 import type { HelperMessage } from '../helper/write-helper';
 
 export interface HelperLaunch {
@@ -118,11 +119,35 @@ export async function runHelper(o: RunHelperOptions): Promise<HelperOutcome> {
   }
 }
 
+/**
+ * @balena/sudo-prompt (archived) checks its arguments with util.isObject and
+ * util.isFunction, which Node.js removed in version 23; Electron's Node.js no
+ * longer has them, and every exec() then throws "Node.util.isObject is not a
+ * function" before asking for the password. Put back the two functions, with
+ * the behaviour they had, before the module is used.
+ */
+export function restoreUtilChecks(): void {
+  const u = util as unknown as Record<string, unknown>;
+  if (typeof u.isObject !== 'function') {
+    u.isObject = (v: unknown) => v !== null && typeof v === 'object';
+  }
+  if (typeof u.isFunction !== 'function') {
+    u.isFunction = (v: unknown) => typeof v === 'function';
+  }
+}
+
+/** The sudo-prompt module, after restoreUtilChecks(). */
+export async function loadSudoPrompt(): Promise<{ exec: Function }> {
+  restoreUtilChecks();
+  const m = await import('@balena/sudo-prompt');
+  return ((m as { default?: unknown }).default ?? m) as { exec: Function };
+}
+
 /** sudo-prompt, wrapped in a promise. */
 export async function sudoPromptElevate(cmd: string, env: Record<string, string>): Promise<void> {
-  const sudo = (await import('@balena/sudo-prompt')).default ?? (await import('@balena/sudo-prompt'));
+  const sudo = await loadSudoPrompt();
   await new Promise<void>((resolve, reject) => {
-    (sudo as { exec: Function }).exec(cmd, { name: 'Roxora Imager', env }, (err: Error | undefined) => {
+    sudo.exec(cmd, { name: 'Roxora Imager', env }, (err: Error | undefined) => {
       if (err) reject(err); else resolve();
     });
   });

@@ -103,3 +103,25 @@ describe('starting the writer', () => {
   });
   void connect;
 });
+
+describe('sudo-prompt on Node.js without util.isObject', () => {
+  it('checks its arguments without the functions Node.js 23 removed', async () => {
+    const util = (await import('node:util')).default as unknown as Record<string, unknown>;
+    const saved = { isObject: util.isObject, isFunction: util.isFunction };
+    // As in Electron's Node.js, where "Node.util.isObject is not a function".
+    delete util.isObject;
+    delete util.isFunction;
+    try {
+      const { loadSudoPrompt } = await import('../src/main/elevate');
+      const sudo = await loadSudoPrompt();
+      // A command starting with "sudo" is refused right after the argument
+      // checks, before any password prompt.
+      const err = await new Promise<Error | undefined>((resolve) => {
+        sudo.exec('sudo true', { name: 'Roxora Imager', env: { A: '1' } }, resolve);
+      });
+      expect(String(err)).toMatch(/should not be prefixed with "sudo"/);
+    } finally {
+      Object.assign(util, saved);
+    }
+  });
+});
