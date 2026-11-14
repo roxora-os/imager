@@ -73,7 +73,7 @@ and from where, is in the
 | Part | Where it comes from |
 | --- | --- |
 | Image list | The releases of roxora-os/build and the `roxora-catalog.json` in each, as described in its [release contract](https://github.com/roxora-os/build/blob/main/docs/release-contract.md). The website reads the same releases. |
-| SD/USB writing | [etcher-sdk](https://github.com/balena-io-modules/etcher-sdk), in a helper process started with administrator rights the way Etcher starts its writer. |
+| SD/USB writing | Linux and Windows: [etcher-sdk](https://github.com/balena-io-modules/etcher-sdk), in a helper process started with administrator rights the way Etcher starts its writer. macOS: Apple's `authopen` opens the raw disk after the system's password dialog, as in Raspberry Pi Imager and Armbian Imager; a small helper (`src/helper/macos/rawdisk.c`) receives the open disk and writes whole blocks, and nothing runs as root (`src/main/mac-write.ts`). |
 | Maskrom writing | rkdeveloptool compiled to WebAssembly with libusb's WebUSB backend, as in [edk2-webflash](https://github.com/gahingwoo/edk2-webflash), running in a worker inside the app. |
 | Maskrom loader | Not shipped. The first Maskrom write downloads the pieces from Rockchip's [rkbin](https://github.com/rockchip-linux/rkbin) at a pinned commit (raw.githubusercontent.com), checks each against a pinned SHA-256, and builds the loader the way rkbin's boot_merger does (`src/maskrom/loader-merge.ts`, ported from RKDevelopTool-GUI). The result must match the SHA-256 of Rockchip's own build of that loader (`src/maskrom/loaders.ts`). The desktop app keeps it in its user data folder (`loaders/`), the web version in the browser's cache storage. Without a connection the write stops before anything is written and says so. |
 | Interface | Electron, React and [PatternFly](https://www.patternfly.org/). |
@@ -85,8 +85,8 @@ Safety rules:
 
 - Drives that hold the running system are never offered: drivelist's
   system flag, any system mount point (`/`, `/boot`, `/home`, `C:\`, ...),
-  read-only, virtual and loop devices are all hidden. The helper checks the
-  target again before it writes.
+  read-only, virtual and loop devices are all hidden. The target is checked
+  again just before it is written.
 - The review page says exactly what will be erased, and writing needs a
   second confirmation.
 - Every write is read back and its SHA-256 compared with the release's
@@ -101,7 +101,7 @@ Needs Node.js 22.
 
 ```sh
 npm ci
-npm run writer              # the SD/USB writer, Node.js packed with pkg
+npm run writer              # the SD/USB writer: Node.js packed with pkg; on macOS a C helper (needs cc)
 sh scripts/build-wasm.sh    # needs emsdk 3.1.48; or take the CI artifact
 npm run build
 npm start                   # or: npx electron . --dev-sample
@@ -118,6 +118,7 @@ entries are marked as samples and cannot be written.
 npm test                                   # catalog, targets, Maskrom through the WASM, download proxy
 node scripts/electron-maskrom-e2e.mjs      # Maskrom path inside Electron
 node test/e2e/sd-loop.mjs                  # SD write to a loop device (Linux, sudo)
+node test/e2e/sd-ramdisk-mac.mjs           # SD write through authopen to a RAM disk (macOS, sudo; changes the authorization database, meant for CI)
 node --test test/webflash/*.test.js        # modules copied from edk2-webflash
 node scripts/shots.mjs dev/shots           # screenshots, light and dark
 node scripts/web-shots.mjs dev/web-shots   # the web version, served under /imager/

@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- macOS: SD cards and USB drives are now written through Apple's `authopen`,
+  as Raspberry Pi Imager and Armbian Imager do, instead of a writer running
+  as root. With 0.1.2 a card on a Mac could keep its old contents from 17 MiB
+  on (the read-back check reported it), and opening the drive could fail with
+  "EPERM: operation not permitted". macOS asks for the password once per
+  write, for that one drive; Full Disk Access is not needed. The data goes to
+  the raw disk in whole 1 MiB pieces and is read back through the same open
+  drive. Tested in CI against a RAM disk, not yet on a real card.
+- macOS: the DMG no longer contains the etcher-sdk writer, only the small
+  helper `roxora-imager-rawdisk`.
+
 ## 0.1.2
 
 A pre-release, still not tested on hardware.

@@ -51,6 +51,15 @@ may say the app cannot be opened, because it is not notarized:
 
 macOS needs no driver for Maskrom writing.
 
+Writing an SD card or USB drive asks for an administrator's password (or
+Touch ID) once per write, in the dialog of macOS itself. The dialog carries
+the sentence "Roxora Imager will erase ... and write the image to it." with
+the name of the drive. The right you grant is for that one drive
+(`sys.openfile.readwrite./dev/rdiskN`): Apple's `/usr/libexec/authopen`
+opens it, and no part of Roxora Imager runs as root. Full Disk Access is not
+needed, and the app does not ask for it. If macOS offers to initialise or
+eject the drive when the write is done, choose Ignore or Eject.
+
 ## Linux
 
 - `.deb` (Debian, Ubuntu) and `.rpm` (Fedora, openSUSE): install with the
