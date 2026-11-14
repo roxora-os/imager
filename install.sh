@@ -18,7 +18,9 @@
 set -eu
 
 REPO="roxora-os/imager"
-API="https://api.github.com/repos/$REPO/releases/latest"
+# The newest release, pre-releases included: releases/latest skips
+# pre-releases, and every Roxora Imager release so far is one.
+API="https://api.github.com/repos/$REPO/releases?per_page=1"
 
 say() { printf '%s\n' "$*"; }
 die() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -60,7 +62,7 @@ case "$kind/$arch" in
   *) die "unknown PACKAGE=$kind (use appimage, deb or rpm)" ;;
 esac
 
-say "Looking up the latest release..."
+say "Looking up the newest release..."
 curl -fsSL -H "Accept: application/vnd.github+json" "$API" -o "$tmp/release.json" \
   || die "couldn't reach GitHub, or there is no release yet"
 
