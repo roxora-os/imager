@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.1.4
 
+The first normal release; earlier versions were pre-releases.
+
+- Images: the newest Ubuntu LTS (26.04) is chosen by default; a non-LTS
+  release such as 26.10 comes after the LTS ones.
+- Images: no "Tested on hardware" or "CI only" labels; a Roxora beta is
+  called a beta, and catalogs of beta releases (YYYY.MM.N-beta.N) are read.
 - New: updates. When a newer version is out, a notice above the steps names
   it, with a line from its release notes and an Update button. Pressing it
   says what will happen and, after "Download and install", does it: the DMG
