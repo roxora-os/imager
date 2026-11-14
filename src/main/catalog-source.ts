@@ -29,6 +29,11 @@ export function writableImage(id: string): CatalogImage | undefined {
   return writable.get(id);
 }
 
+/** Every image of the loaded releases: what a file on this computer is compared with by name. */
+export function writableImages(): CatalogImage[] {
+  return [...writable.values()];
+}
+
 export async function loadReleases(): Promise<CatalogState> {
   let releases: GithubRelease[];
   try {

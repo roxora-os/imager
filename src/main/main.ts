@@ -2,14 +2,20 @@
 // for the Maskrom worker, and everything that touches disks or the network.
 
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, net, session, shell, type WebContents } from 'electron';
+import { randomBytes } from 'node:crypto';
+import { open } from 'node:fs/promises';
 import { join } from 'node:path';
 import * as drivelist from 'drivelist';
-import { classifyDrives, type DriveInfo } from '../shared/targets';
-import type { JobProgress, JobResult, PreparedFile } from '../shared/ipc';
-import { loadReleases, loadSample, writableImage, type CatalogState } from './catalog-source';
+import { formatBytes } from '../shared/format';
+import { classifyDrives, isOfferedTarget, type DriveInfo } from '../shared/targets';
+import type { JobProgress, JobResult, LocalImage, PreparedFile } from '../shared/ipc';
+import type { CatalogImage } from '../shared/catalog';
+import { partitionedSize } from '../maskrom/spi-check';
+import { loadReleases, loadSample, writableImage, writableImages, type CatalogState } from './catalog-source';
 import { helperLaunch, runHelper, sudoPromptElevate } from './elevate';
 import { decompress, detectCompression, fetchImage, forgetFile, serveFile, serveFileAs } from './images';
 import { ensureLoader } from './loader-cache';
+import { describeLocal, measureFile, sha256OfFile } from './local-image';
 import { handleProtocol, ORIGIN, registerScheme } from './protocol';
 import { macWrite } from './mac-write';
 import { loadSettings, saveSettings } from './settings';
@@ -110,6 +116,33 @@ ipcMain.handle('drives:list', async (_e, minSize: number) => {
 
 ipcMain.handle('job:cancel', () => { job?.abort(); });
 
+/** Write an image file to a drive and read it back: macOS through authopen, else the elevated writer. */
+async function writeDrive(wc: WebContents, signal: AbortSignal,
+  w: { file: string; device: string; extractSize: number; extractSha256: string }): Promise<JobResult> {
+  const out = process.platform === 'darwin'
+    ? await macWrite({
+      signal, image: w.file, device: w.device, extractSize: w.extractSize, extractSha256: w.extractSha256,
+      helperPath: writerPath(RAWDISK),
+      onProgress: (p) => sendProgress(wc, { stage: p.stage, bytes: p.bytes, total: w.extractSize, speed: p.speed }),
+    })
+    : await runHelper({
+      signal,
+      launch: (dir) => helperLaunch({ writerPath: writerPath(), dir, appImage: process.env.APPIMAGE }),
+      args: (socket, token) => [
+        '--socket', socket, '--token', token, '--image', w.file, '--device', w.device,
+        '--extract-size', String(w.extractSize), '--extract-sha256', w.extractSha256,
+      ],
+      onMessage: (m) => {
+        if (m.type === 'progress') {
+          sendProgress(wc, { stage: m.stage, bytes: m.bytes, total: w.extractSize, speed: m.speed });
+        }
+      },
+      elevate: sudoPromptElevate,
+    });
+  if (out.ok) return { ok: true, sha256: out.sha256 };
+  return { ok: false, reason: out.reason, ...(out.detail ? { detail: out.detail } : {}) };
+}
+
 ipcMain.handle('sd:write', async (e, imageId: string, device: string): Promise<JobResult> => {
   const img = writableImage(imageId);
   if (!img || img.sample) return { ok: false, reason: 'This image is not from a published release and cannot be written.' };
@@ -118,29 +151,7 @@ ipcMain.handle('sd:write', async (e, imageId: string, device: string): Promise<J
   const wc = e.sender;
   try {
     const file = await fetchImage(img, cacheDir(), (p) => sendProgress(wc, p), job.signal);
-    const signal = job.signal;
-    const out = process.platform === 'darwin'
-      ? await macWrite({
-        signal, image: file, device, extractSize: img.extractSize, extractSha256: img.extractSha256,
-        helperPath: writerPath(RAWDISK),
-        onProgress: (p) => sendProgress(wc, { stage: p.stage, bytes: p.bytes, total: img.extractSize, speed: p.speed }),
-      })
-      : await runHelper({
-        signal,
-        launch: (dir) => helperLaunch({ writerPath: writerPath(), dir, appImage: process.env.APPIMAGE }),
-        args: (socket, token) => [
-          '--socket', socket, '--token', token, '--image', file, '--device', device,
-          '--extract-size', String(img.extractSize), '--extract-sha256', img.extractSha256,
-        ],
-        onMessage: (m) => {
-          if (m.type === 'progress') {
-            sendProgress(wc, { stage: m.stage, bytes: m.bytes, total: img.extractSize, speed: m.speed });
-          }
-        },
-        elevate: sudoPromptElevate,
-      });
-    if (out.ok) return { ok: true, sha256: out.sha256 };
-    return { ok: false, reason: out.reason, ...(out.detail ? { detail: out.detail } : {}) };
+    return await writeDrive(wc, job.signal, { file, device, extractSize: img.extractSize, extractSha256: img.extractSha256 });
   } catch (err) {
     if (job?.signal.aborted) return { ok: false, reason: 'Cancelled.' };
     return { ok: false, reason: String((err as Error).message ?? err) };
@@ -149,13 +160,102 @@ ipcMain.handle('sd:write', async (e, imageId: string, device: string): Promise<J
   }
 });
 
+// An image file on this computer for the SD/USB path (local-image.ts). The
+// page only holds a token; the path stays here.
+let localImage: { token: string; path: string; image: CatalogImage | null; sizeHint: number } | null = null;
+
+async function describeForPage(path: string): Promise<LocalImage | { error: string }> {
+  if (job) return { error: 'Another job is running.' };
+  job = new AbortController();
+  try {
+    const d = await describeLocal(path, writableImages(), { signal: job.signal });
+    const token = randomBytes(16).toString('hex');
+    localImage = { token, path, image: d.image, sizeHint: d.extractSize || d.size };
+    return { token, name: d.name, size: d.size, extractSize: d.extractSize, imageId: d.image?.id ?? null };
+  } catch (err) {
+    return { error: String((err as Error).message ?? err) };
+  } finally {
+    job = null;
+  }
+}
+
+// Unpackaged builds only: the file "chosen" without a dialog, for the screenshots.
+const TEST_PICK = !app.isPackaged ? process.env.ROXORA_IMAGER_TEST_PICK : undefined;
+
+ipcMain.handle('sd:pick', async () => {
+  if (TEST_PICK) return describeForPage(TEST_PICK);
+  const r = await dialog.showOpenDialog(win!, {
+    title: 'Choose an image file',
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['img', 'xz', 'gz', 'bz2', 'raw'] }, { name: 'All files', extensions: ['*'] }],
+  });
+  if (r.canceled || r.filePaths.length === 0) return null;
+  return describeForPage(r.filePaths[0]);
+});
+
+ipcMain.handle('sd:drop', async (_e, path: unknown) => {
+  if (typeof path !== 'string' || !path) return { error: 'That is not a file on this computer.' };
+  return describeForPage(path);
+});
+
+ipcMain.handle('sd:write-file', async (e, token: string, device: string): Promise<JobResult> => {
+  const l = localImage;
+  if (!l || l.token !== token) return { ok: false, reason: 'Choose the image file again. Nothing was written.' };
+  if (job) return { ok: false, reason: 'Another write is running.' };
+  job = new AbortController();
+  const wc = e.sender;
+  const signal = job.signal;
+  try {
+    let extractSize: number;
+    let extractSha256: string;
+    if (l.image) {
+      // A release image: checked against the release again, as a download is.
+      const total = l.image.size;
+      const got = await sha256OfFile(l.path, (bytes) => sendProgress(wc, { stage: 'check', bytes, total }), signal);
+      if (got !== l.image.sha256) {
+        return { ok: false, reason: 'The file no longer matches the release. Nothing was written.',
+          detail: `sha256 ${got}, release ${l.image.sha256}` };
+      }
+      ({ extractSize, extractSha256 } = l.image);
+    } else {
+      // A custom image: its own decompressed data is what the drive must read back as.
+      const m = await measureFile(l.path, (bytes) => sendProgress(wc, { stage: 'check', bytes, total: Math.max(l.sizeHint, bytes) }), signal);
+      extractSize = m.size;
+      extractSha256 = m.sha256;
+      const drives = await drivelist.list() as unknown as DriveInfo[];
+      if (!isOfferedTarget(device, drives, { minSize: m.size, platform: process.platform })) {
+        return { ok: false, reason: `${device} is smaller than the image (${formatBytes(m.size)}), or no longer a drive the imager writes to. Nothing was written.` };
+      }
+    }
+    return await writeDrive(wc, signal, { file: l.path, device, extractSize, extractSha256 });
+  } catch (err) {
+    if (signal.aborted) return { ok: false, reason: 'Cancelled. Nothing was written.' };
+    return { ok: false, reason: String((err as Error).message ?? err) };
+  } finally {
+    job = null;
+  }
+});
+
+/** The size of the disk a plain image's partition table describes, for the SPI NOR check (maskrom/spi-check.ts). */
+async function diskSizeOf(path: string): Promise<number> {
+  const fh = await open(path, 'r');
+  try {
+    const head = Buffer.alloc(1024);
+    const { bytesRead } = await fh.read(head, 0, head.length, 0);
+    return partitionedSize(head.subarray(0, bytesRead));
+  } finally {
+    await fh.close();
+  }
+}
+
 async function prepare(wc: WebContents, path: string, name: string, expected: { size: number; sha256: string } | null,
   signal: AbortSignal): Promise<PreparedFile> {
   const kind = await detectCompression(path);
   if (kind === null) {
     // A plain image is served as it is; its hash is taken while it is written.
     const s = serveFile(path);
-    return { token: s.token, url: `${ORIGIN}/file/${s.token}`, size: s.size, sha256: expected?.sha256 ?? null, name };
+    return { token: s.token, url: `${ORIGIN}/file/${s.token}`, size: s.size, sha256: expected?.sha256 ?? null, name,
+      diskSize: await diskSizeOf(path) };
   }
   const out = await decompress(path, join(cacheDir(), 'maskrom'), (p) => sendProgress(wc, p), signal, expected?.size);
   if (expected && (out.size !== expected.size || out.sha256 !== expected.sha256)) {
@@ -164,7 +264,8 @@ async function prepare(wc: WebContents, path: string, name: string, expected: { 
   }
   const s = serveFile(out.path);
   temporary.add(s.token);
-  return { token: s.token, url: `${ORIGIN}/file/${s.token}`, size: s.size, sha256: out.sha256, name };
+  return { token: s.token, url: `${ORIGIN}/file/${s.token}`, size: s.size, sha256: out.sha256, name,
+    diskSize: await diskSizeOf(out.path) };
 }
 
 const temporary = new Set<string>();

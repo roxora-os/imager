@@ -1,5 +1,5 @@
 // The page's only way to the main process: window.imager (see shared/ipc.ts).
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ImagerApi, JobProgress } from '../shared/ipc';
 
 const info = ipcRenderer.sendSync('app:info') as { platform: string; version: string; devSample: boolean };
@@ -9,6 +9,10 @@ const api: ImagerApi = {
   loadCatalog: (opts) => ipcRenderer.invoke('catalog:load', opts),
   listDrives: (minSize) => ipcRenderer.invoke('drives:list', minSize),
   writeSd: (imageId, device) => ipcRenderer.invoke('sd:write', imageId, device),
+  pickLocalImage: () => ipcRenderer.invoke('sd:pick'),
+  // Only the preload script can tell where a dropped file is.
+  dropLocalImage: (file) => ipcRenderer.invoke('sd:drop', webUtils.getPathForFile(file)),
+  writeLocalImage: (token, device) => ipcRenderer.invoke('sd:write-file', token, device),
   cancel: () => ipcRenderer.invoke('job:cancel'),
   onProgress: (cb) => {
     const h = (_e: unknown, p: JobProgress) => cb(p);

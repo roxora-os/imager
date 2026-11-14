@@ -25,6 +25,26 @@ export interface PreparedFile {
   /** SHA-256 the written bytes must have, or null for a local file without one. */
   sha256: string | null;
   name: string;
+  /**
+   * The size of the disk its partition table describes (maskrom/spi-check.ts),
+   * 0 without one; missing where the start of the image could not be read.
+   */
+  diskSize?: number;
+}
+
+/** An image file on this computer, chosen for the SD card / USB drive path. */
+export interface LocalImage {
+  token: string;
+  name: string;
+  /** Size of the file itself. */
+  size: number;
+  /** Size once decompressed; 0 when only reading it all tells (gzip, bzip2). */
+  extractSize: number;
+  /**
+   * The catalog image this file is (same name, same SHA-256), or null for a
+   * custom image that no release vouches for.
+   */
+  imageId: string | null;
 }
 
 export interface ImagerApi {
@@ -34,6 +54,12 @@ export interface ImagerApi {
   loadCatalog(opts: { sample: boolean }): Promise<CatalogResult>;
   listDrives(minSize: number): Promise<{ targets: Target[]; hidden: HiddenDrive[] }>;
   writeSd(imageId: string, device: string): Promise<JobResult>;
+  /** Desktop only: choose an image file on this computer for the SD/USB path. */
+  pickLocalImage?(): Promise<LocalImage | { error: string } | null>;
+  /** Desktop only: the same for a file dropped onto the window. */
+  dropLocalImage?(file: File): Promise<LocalImage | { error: string }>;
+  /** Desktop only: write the file chosen with one of the two above. */
+  writeLocalImage?(token: string, device: string): Promise<JobResult>;
   cancel(): Promise<void>;
   onProgress(cb: (p: JobProgress) => void): () => void;
   prepareMaskrom(imageId: string, what?: 'image' | 'spi'): Promise<PreparedFile | { error: string }>;
