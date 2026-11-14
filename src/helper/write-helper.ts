@@ -18,6 +18,7 @@ import * as drivelist from 'drivelist';
 // scanner, which pulls in the Raspberry Pi and BeagleBone USB boot modules
 // and their firmware blobs. Those are not shipped (scripts/build-writer.mjs).
 import * as multiWrite from 'etcher-sdk/build/multi-write';
+import { guardReadsAfterClose } from './read-guard';
 import * as sourceDestination from 'etcher-sdk/build/source-destination';
 import { isOfferedTarget, type DriveInfo } from '../shared/targets';
 
@@ -103,6 +104,7 @@ export async function runWrite(a: HelperArgs, send: (m: HelperMessage) => void):
   }
 
   const source = new sourceDestination.File({ path: a.image });
+  guardReadsAfterClose(source);
   const dest = new sourceDestination.BlockDevice({ drive, write: true, direct: true, unmountOnSuccess: false });
   let failure: Error | null = null;
   await multiWrite.decompressThenFlash({
