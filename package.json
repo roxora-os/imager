@@ -1,7 +1,7 @@
 {
   "name": "roxora-imager",
   "productName": "Roxora Imager",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Write Roxora images to SD cards and USB drives, and flash SPI NOR or eMMC over Maskrom.",
   "homepage": "https://github.com/roxora-os/imager",
   "license": "GPL-2.0-only",

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1
+
+A pre-release, still not tested on hardware.
+
+- Fix: writing an SD card or USB drive failed at once with "The writer could
+  not be started. Node.util.isObject is not a function" on every system. The
+  module that asks for administrator rights used functions that Electron's
+  Node.js no longer has.
+
 ## 0.1.0
 
 First version, a pre-release: not yet tested on hardware.
