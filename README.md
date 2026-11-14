@@ -51,9 +51,8 @@ Pages workflow takes it from the repository variable of the same name). It is
 empty until the Worker is deployed. The desktop app downloads directly and
 does not use it.
 
-Status: first version, not yet tested on hardware. It lists the Roxora
-pre-releases, which are built and checked in CI but not yet booted on
-hardware either.
+Status: not yet tested on hardware. It lists the Roxora pre-releases, which
+are built and checked in CI but not yet booted on hardware either.
 
 ## Install
 
@@ -71,6 +70,14 @@ On macOS also with Homebrew:
 brew trust gahingwoo/tap
 brew install --cask gahingwoo/tap/roxora-imager
 ```
+
+The app looks for a newer version once a day and offers to install it
+(Settings has "Check now" and the switch to turn the check off). Normal
+releases are offered to everyone. Beta versions are the pre-releases on
+GitHub, with a version such as 0.1.5-beta.1; they are offered only when
+"Also offer beta versions (pre-releases)" is turned on in Settings, and
+`install.sh` installs one only with `BETA=1`. How an update is installed
+depends on how the app was installed: [docs/install.md](docs/install.md#updates).
 
 What each system asks on first start, and the drivers for Maskrom writing:
 [docs/install.md](docs/install.md). The website lists the packages of the

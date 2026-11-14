@@ -9,7 +9,16 @@ curl -fsSL https://raw.githubusercontent.com/roxora-os/imager/main/install.sh | 
 ```
 
 The script picks the package for the system and checks the download against
-the SHA-256 GitHub publishes for it.
+the SHA-256 GitHub publishes for it. It installs the newest normal release.
+To get the newest beta version instead (a pre-release on GitHub, such as
+0.1.5-beta.1), run it with `BETA=1`:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/roxora-os/imager/main/install.sh | BETA=1 sh
+```
+
+While no normal release exists yet, the script installs the newest beta and
+says so.
 
 The packages do not include Rockchip's Maskrom loader. The first Maskrom
 write downloads its pieces from Rockchip's rkbin repository
@@ -95,3 +104,36 @@ takes .img files, plain or compressed with xz, gzip or bzip2.
 For a board's SPI NOR flash (Maskrom) use the release's SPI bootloader. A
 file from this computer is accepted there only if it can be a bootloader:
 not larger than the SPI flash, and not a disk image.
+
+## Updates
+
+The app asks GitHub for the list of Roxora Imager releases when it starts,
+at most once a day. When a newer version is out, a notice above the steps
+names it, with the first line of its release notes, a link to the notes and
+an **Update** button. Closing the notice hides that version; Settings still
+offers it. No notice appears while a write is running. In Settings:
+
+- **Check for a new version once a day** turns the check off or on.
+- **Also offer beta versions (pre-releases)** is off by default. Normal
+  releases are offered to everyone; betas only with this switch on. If the
+  version you run is itself a beta and no newer normal release exists, the
+  app says so and offers nothing.
+- **Check now** asks at once and answers in words: the new version, "You
+  have the newest version", or that GitHub could not be reached.
+
+Nothing is downloaded or installed until you press Update and then
+**Download and install**. Every download is compared with the SHA-256 that
+GitHub lists for the file; a file without one, or with a different one, is
+deleted and not installed. The download shows its progress and can be
+cancelled. What happens then depends on how the app was installed:
+
+| Installed as | Update |
+| --- | --- |
+| macOS, Homebrew cask | The app shows the command `brew upgrade --cask roxora-imager` to copy. It does not run Homebrew. |
+| macOS, DMG or install.sh | The DMG for this Mac's CPU goes to the Downloads folder and is opened. Quit Roxora Imager and drag the new app onto Applications. The app does not replace itself. |
+| Windows, installer | The setup program is downloaded and started, and Roxora Imager closes so that it can be replaced. |
+| Linux, AppImage | The new AppImage is downloaded into the same folder and put in place of the old file in one step. Restart the app. |
+| Linux, .deb or .rpm | The package is downloaded and installed with apt-get, dnf or zypper through pkexec, which asks for your password. If that is not possible the app shows the command to run in a terminal. Restart the app. |
+| Windows zip, an unpacked folder | Not updated by the app: the notice links to the release page. |
+
+The web version is always the newest and has no update function.

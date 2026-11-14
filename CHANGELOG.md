@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+- New: updates. When a newer version is out, a notice above the steps names
+  it, with a line from its release notes and an Update button. Pressing it
+  says what will happen and, after "Download and install", does it: the DMG
+  is downloaded and opened on macOS, the installer is run on Windows, an
+  AppImage is replaced in place, a .deb or .rpm is installed through the
+  package manager with pkexec; a Homebrew install is shown the brew command.
+  Every download is compared with the SHA-256 GitHub lists for the file and
+  refused without it. Settings has "Check now", which says what it found.
+- Fix: the daily check for a new version never found one. It asked GitHub
+  for the "latest" release, which leaves out pre-releases, and every release
+  so far was a pre-release, so the answer was always "no release".
+- Normal releases and betas. From this version on a release is a normal
+  release; a GitHub pre-release (a version such as 0.1.5-beta.1) is a beta.
+  The app offers betas only with "Also offer beta versions (pre-releases)"
+  turned on in Settings, and install.sh installs one only with `BETA=1`.
+  The release workflow publishes a tag with a suffix as a pre-release and
+  any other tag as a normal release.
+
 ## 0.1.3
 
 A pre-release, still not tested on hardware.
