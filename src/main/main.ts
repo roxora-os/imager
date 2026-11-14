@@ -11,6 +11,7 @@ import { helperLaunch, runHelper, sudoPromptElevate } from './elevate';
 import { decompress, detectCompression, fetchImage, forgetFile, serveFile, serveFileAs } from './images';
 import { ensureLoader } from './loader-cache';
 import { handleProtocol, ORIGIN, registerScheme } from './protocol';
+import { macWrite } from './mac-write';
 import { loadSettings, saveSettings } from './settings';
 import { checkForUpdate } from './updater';
 import { installUsbHandlers, ROCKCHIP_VID, type UsbChoice } from './usb';
@@ -31,8 +32,10 @@ const cacheDir = () => join(app.getPath('userData'), 'images');
 const loaderDir = () => join(app.getPath('userData'), 'loaders');
 
 const WRITER = process.platform === 'win32' ? 'roxora-imager-writer.exe' : 'roxora-imager-writer';
-function writerPath(): string {
-  return app.isPackaged ? join(process.resourcesPath, 'writer', WRITER) : join(appDir, 'build-res', 'writer', WRITER);
+// On macOS the disk is opened by Apple's authopen instead (mac-write.ts).
+const RAWDISK = 'roxora-imager-rawdisk';
+function writerPath(name = WRITER): string {
+  return app.isPackaged ? join(process.resourcesPath, 'writer', name) : join(appDir, 'build-res', 'writer', name);
 }
 
 let win: BrowserWindow | null = null;
@@ -115,20 +118,27 @@ ipcMain.handle('sd:write', async (e, imageId: string, device: string): Promise<J
   const wc = e.sender;
   try {
     const file = await fetchImage(img, cacheDir(), (p) => sendProgress(wc, p), job.signal);
-    const out = await runHelper({
-      signal: job.signal,
-      launch: (dir) => helperLaunch({ writerPath: writerPath(), dir, appImage: process.env.APPIMAGE }),
-      args: (socket, token) => [
-        '--socket', socket, '--token', token, '--image', file, '--device', device,
-        '--extract-size', String(img.extractSize), '--extract-sha256', img.extractSha256,
-      ],
-      onMessage: (m) => {
-        if (m.type === 'progress') {
-          sendProgress(wc, { stage: m.stage, bytes: m.bytes, total: img.extractSize, speed: m.speed });
-        }
-      },
-      elevate: sudoPromptElevate,
-    });
+    const signal = job.signal;
+    const out = process.platform === 'darwin'
+      ? await macWrite({
+        signal, image: file, device, extractSize: img.extractSize, extractSha256: img.extractSha256,
+        helperPath: writerPath(RAWDISK),
+        onProgress: (p) => sendProgress(wc, { stage: p.stage, bytes: p.bytes, total: img.extractSize, speed: p.speed }),
+      })
+      : await runHelper({
+        signal,
+        launch: (dir) => helperLaunch({ writerPath: writerPath(), dir, appImage: process.env.APPIMAGE }),
+        args: (socket, token) => [
+          '--socket', socket, '--token', token, '--image', file, '--device', device,
+          '--extract-size', String(img.extractSize), '--extract-sha256', img.extractSha256,
+        ],
+        onMessage: (m) => {
+          if (m.type === 'progress') {
+            sendProgress(wc, { stage: m.stage, bytes: m.bytes, total: img.extractSize, speed: m.speed });
+          }
+        },
+        elevate: sudoPromptElevate,
+      });
     if (out.ok) return { ok: true, sha256: out.sha256 };
     return { ok: false, reason: out.reason, ...(out.detail ? { detail: out.detail } : {}) };
   } catch (err) {

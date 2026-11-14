@@ -1,10 +1,11 @@
 // Start the write helper with administrator rights and follow its progress.
+// Linux and Windows only: macOS writes through Apple's authopen, with no
+// process of ours running as root (mac-write.ts).
 //
 // The helper is a standalone executable (Node.js packed with pkg, like
 // Etcher's etcher-util), started through @balena/sudo-prompt the way Etcher
-// does it: pkexec on Linux, the password dialog on macOS, UAC on Windows. It
-// reports over a local socket, because the elevated process's stdout only
-// arrives when it exits.
+// does it: pkexec on Linux, UAC on Windows. It reports over a local socket,
+// because the elevated process's stdout only arrives when it exits.
 
 import { randomBytes } from 'node:crypto';
 import { chmodSync, copyFileSync, mkdtempSync, rmSync } from 'node:fs';
