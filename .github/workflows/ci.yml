@@ -52,6 +52,29 @@ jobs:
           name: screenshots
           path: shots/
 
+  sd-e2e-mac:
+    name: SD write to a RAM disk on macOS
+    needs: wasm
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      # Built as in release.yml, so this is the writer the DMG ships.
+      - name: Writer (Node.js packed with pkg, as Etcher's etcher-util)
+        run: npm run writer
+      - uses: actions/download-artifact@v4
+        with:
+          name: rkdeveloptool-wasm
+          path: vendor/rkdeveloptool-wasm
+      - run: npm run build
+      - run: command -v xz || brew install xz
+      - name: Write and read back, with the app's buffers and with 2
+        run: node test/e2e/sd-ramdisk-mac.mjs
+
   sd-e2e:
     name: SD write to a loop device
     needs: wasm
