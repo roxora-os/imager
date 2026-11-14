@@ -9,7 +9,8 @@ import { join } from 'node:path';
 
 const out = process.argv[2] ?? 'dev/shots';
 mkdirSync(out, { recursive: true });
-const env = { ...process.env, ROXORA_IMAGER_HIDDEN: '1', ROXORA_IMAGER_SAMPLE: '1', ROXORA_IMAGER_FAKE_DRIVES: '1' };
+// No question to GitHub about a newer app version either: the pictures must not depend on what is published.
+const env = { ...process.env, ROXORA_IMAGER_HIDDEN: '1', ROXORA_IMAGER_SAMPLE: '1', ROXORA_IMAGER_FAKE_DRIVES: '1', ROXORA_IMAGER_FAKE_UPDATE: 'current' };
 delete env.ELECTRON_RUN_AS_NODE;
 const errors = [];
 
@@ -124,5 +125,51 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
   if (await page.locator('text=Not a Roxora release image').count()) throw new Error('the custom file stayed after a board was chosen');
   await shot('2-image-after-custom');
   await app.close();
+}
+// The update notice, the update dialog and the answers to "Check now" in the
+// settings, with a made-up answer instead of GitHub (unpackaged builds only).
+for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
+  for (const fake of ['newer', 'current', 'error']) {
+    const app = await electron.launch({ args: ['.', '--dev-sample'], env: { ...env, ROXORA_IMAGER_FAKE_UPDATE: fake } });
+    const page = await app.firstWindow();
+    page.on('pageerror', (e) => errors.push(`update-${fake}-${tag}: ${e.message}`));
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(`update-${fake}-${tag} console: ${m.text()}`); });
+    await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setContentSize(w, h), [w, h]);
+    await page.evaluate(() => { localStorage.setItem('theme', 'light'); localStorage.removeItem('updateDismissed'); });
+    await page.reload();
+    await page.waitForSelector('h2:has-text("Board")');
+    const shot = async (name) => {
+      await page.mouse.move(1, 1);
+      await page.waitForTimeout(400);
+      const b64 = await app.evaluate(async ({ BrowserWindow }) =>
+        (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+      writeFileSync(`${out}/${name}-${tag}-light.png`, Buffer.from(b64, 'base64'));
+    };
+    if (fake === 'newer') {
+      await page.waitForSelector('text=Roxora Imager 9.9.9 is available');
+      await shot('6-update-notice');
+      await page.click('.update-notice button:has-text("Update")');
+      await page.waitForSelector('#update-title');
+      await page.waitForSelector('text=puts it in place of the AppImage you are running');
+      await shot('6-update-dialog');
+      // Nothing was downloaded: the dialog only says what would happen.
+      await page.click('.pf-v6-c-modal-box__footer button:has-text("Cancel")');
+    } else if (await page.locator('.update-notice').count()) {
+      throw new Error(`an update notice is shown although the check said "${fake}"`);
+    }
+    await page.click('.pf-v6-c-masthead button:has-text("Settings")');
+    await page.waitForSelector('#settings-title');
+    await page.click('button:has-text("Check now")');
+    await page.waitForSelector({ newer: 'text=Roxora Imager 9.9.9 is available.', current: 'text=You have the newest version (',
+      error: 'text=Could not reach GitHub.' }[fake]);
+    await shot(`5-settings-check-${fake}`);
+    if (fake === 'newer') {
+      // Closing the notice hides it; the settings still offer the version.
+      await page.click('.pf-v6-c-modal-box__footer button:has-text("Close")');
+      await page.click('.update-notice button[aria-label^="Close"]');
+      await page.waitForSelector('.update-notice', { state: 'detached' });
+    }
+    await app.close();
+  }
 }
 console.log(errors.length ? 'errors:\n' + errors.join('\n') : 'no page errors');

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ActionList, ActionListGroup, ActionListItem, Alert, Button, CodeBlock, CodeBlockCode, Content, DescriptionList,
+  ActionList, ActionListGroup, ActionListItem, Alert, AlertActionCloseButton, AlertActionLink, Button, ClipboardCopy, CodeBlock, CodeBlockCode, Content, DescriptionList,
   DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, EmptyState, EmptyStateActions, EmptyStateBody,
   EmptyStateFooter, ExpandableSection, Flex, FlexItem, Form, FormGroup, FormSelect, FormSelectOption, Masthead,
   MastheadBrand, MastheadContent, MastheadLogo, MastheadMain, Modal, ModalBody, ModalFooter, ModalHeader, Page,
@@ -17,6 +17,7 @@ import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../s
 import { formatBytes, statusWords } from '../shared/format';
 import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile } from '../shared/ipc';
 import type { HiddenDrive, Target } from '../shared/targets';
+import type { UpdateCheck, UpdateOffer, UpdateResult } from '../shared/update';
 import { maskromBoard, STORAGES, type StorageId } from '../maskrom/boards';
 import { RKBIN_HOST } from '../maskrom/loaders';
 import { SPI_FLASH_FALLBACK, spiFileProblem } from '../maskrom/spi-check';
@@ -628,12 +629,115 @@ function RunView({ run, onCancel, onDone, reconnect }: { run: Run; onCancel: () 
   );
 }
 
-function SettingsModal({ open, onClose, theme, setTheme }: { open: boolean; onClose: () => void; theme: Theme; setTheme: (t: Theme) => void }) {
-  const [s, setS] = useState<{ updateCheck: boolean; resetAfterMaskrom: boolean } | null>(null);
-  useEffect(() => { if (open) api.getSettings().then(setS); }, [open]);
-  const set = (patch: Partial<{ updateCheck: boolean; resetAfterMaskrom: boolean }>) => {
+/** What pressing Update will do, by how this copy was installed. Shown before anything is downloaded. */
+function updatePlan(o: UpdateOffer): string {
+  const file = o.asset ? `${o.asset.name} (${formatBytes(o.asset.size)})` : '';
+  const checked = 'checks it against the SHA-256 GitHub lists for it';
+  switch (o.kind) {
+    case 'dmg': return `Roxora Imager downloads ${file} to your Downloads folder, ${checked}, and opens it. You then quit Roxora Imager and drag the new app onto Applications.`;
+    case 'windows': return `Roxora Imager downloads the installer ${file}, ${checked}, then closes and starts the installer.`;
+    case 'appimage': return `Roxora Imager downloads ${file}, ${checked}, and puts it in place of the AppImage you are running. You then restart the app.`;
+    case 'deb': case 'rpm': return `Roxora Imager downloads ${file}, ${checked}, and installs it with the system's package manager, which asks for your password. You then restart the app.`;
+    default: return '';
+  }
+}
+
+/* The update itself: nothing is downloaded before the button in here is pressed. */
+function UpdateModal({ offer, onClose }: { offer: UpdateOffer | null; onClose: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState<{ bytes: number; total: number } | null>(null);
+  const [result, setResult] = useState<UpdateResult | null>(null);
+  useEffect(() => { setResult(null); setProgress(null); }, [offer?.version]);
+  if (!offer) return null;
+  const canInstall = !!api.installUpdate && !!offer.asset && offer.kind !== 'brew' && offer.kind !== 'none';
+  const start = async () => {
+    setBusy(true);
+    setResult(null);
+    setProgress({ bytes: 0, total: offer.asset?.size ?? 0 });
+    const off = api.onUpdateProgress?.(setProgress);
+    const r = await api.installUpdate!();
+    off?.();
+    setBusy(false);
+    setResult(r);
+  };
+  const close = () => { if (!busy) onClose(); };
+  const notes = <Button variant="link" isInline component="a" href={offer.url} target="_blank">Release notes</Button>;
+  return (
+    <Modal isOpen onClose={close} variant="small" aria-labelledby="update-title">
+      <ModalHeader title={`Update to Roxora Imager ${offer.version}${offer.beta ? ' (beta)' : ''}`} labelId="update-title" />
+      <ModalBody>
+        <Stack hasGutter>
+          {offer.kind === 'brew' && (
+            <>
+              <Content component="p">This copy was installed with Homebrew. Update it in Terminal with:</Content>
+              <ClipboardCopy isReadOnly hoverTip="Copy" clickTip="Copied">{'brew upgrade --cask roxora-imager'}</ClipboardCopy>
+            </>
+          )}
+          {offer.kind !== 'brew' && !canInstall && (
+            <Content component="p">
+              The app cannot update this copy itself{offer.kind === 'none' ? '' : ': the release has no package for this computer'}.
+              Get the new version from the release page.
+            </Content>
+          )}
+          {canInstall && !busy && !result && <Content component="p">{updatePlan(offer)}</Content>}
+          {busy && progress && (
+            <Progress title={`Downloading ${offer.asset?.name ?? ''}`} measureLocation={ProgressMeasureLocation.top}
+              value={progress.total ? Math.min(100, Math.floor(progress.bytes * 100 / progress.total)) : 0}
+              label={`${formatBytes(progress.bytes)} of ${formatBytes(progress.total)}`} />
+          )}
+          {result && (
+            <Alert isInline variant={result.ok ? 'success' : 'danger'} title={result.ok ? result.message : result.reason} />
+          )}
+          {result && !result.ok && result.command && (
+            <ClipboardCopy isReadOnly hoverTip="Copy" clickTip="Copied">{result.command}</ClipboardCopy>
+          )}
+          <StackItem>{notes}</StackItem>
+        </Stack>
+      </ModalBody>
+      <ModalFooter>
+        {canInstall && !busy && !result && <Button variant="primary" onClick={start}>Download and install</Button>}
+        {busy && <Button variant="secondary" onClick={() => api.cancelUpdate?.()}>Cancel</Button>}
+        {result?.ok && result.restart && <Button variant="primary" onClick={() => api.restartApp?.()}>Restart now</Button>}
+        {result && !result.ok && canInstall && <Button variant="secondary" onClick={start}>Try again</Button>}
+        {!busy && <Button variant="link" onClick={close}>{result?.ok && result.restart ? 'Later' : result || !canInstall ? 'Close' : 'Cancel'}</Button>}
+      </ModalFooter>
+    </Modal>
+  );
+}
+
+/** The answer to "Check now", in a sentence. */
+function checkWords(c: UpdateCheck): string {
+  if (c.state === 'error') return c.message;
+  if (c.state === 'newer') return `Roxora Imager ${c.offer.version}${c.offer.beta ? ' (beta)' : ''} is available.`;
+  const beta = c.newerBeta ? ` A newer beta, ${c.newerBeta}, is out; turn on beta versions to be offered it.` : '';
+  return (c.beta ? `You have ${c.version}, a beta version. There is no newer normal release yet.`
+    : `You have the newest version (${c.version}).`) + beta;
+}
+
+type AppSettings = { updateCheck: boolean; betaUpdates?: boolean; resetAfterMaskrom: boolean };
+
+function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writing }: {
+  open: boolean; onClose: () => void; theme: Theme; setTheme: (t: Theme) => void;
+  /** A check found a newer version. */
+  onOffer: (o: UpdateOffer) => void;
+  /** The user wants it. */
+  onUpdate: () => void;
+  writing: boolean;
+}) {
+  const [s, setS] = useState<AppSettings | null>(null);
+  const [check, setCheck] = useState<UpdateCheck | null>(null);
+  const [checking, setChecking] = useState(false);
+  useEffect(() => { if (open) { api.getSettings().then(setS); setCheck(null); } }, [open]);
+  const set = (patch: Partial<AppSettings>) => {
     setS((cur) => (cur ? { ...cur, ...patch } : cur));
-    api.setSettings(patch);
+    return api.setSettings(patch);
+  };
+  const checkNow = async () => {
+    setChecking(true);
+    const r = await api.checkUpdate(true);
+    setChecking(false);
+    setCheck(r);
+    if (r?.state === 'newer') onOffer(r.offer);
   };
   return (
     <Modal isOpen={open} onClose={onClose} variant="small" aria-labelledby="settings-title">
@@ -642,11 +746,26 @@ function SettingsModal({ open, onClose, theme, setTheme }: { open: boolean; onCl
         {s && (
           <Form onSubmit={(e) => e.preventDefault()}>
             {!WEB && (
-              <Switch id="set-update" label="Check for a new version once a day" isChecked={s.updateCheck}
-                onChange={(_e, v) => set({ updateCheck: v })} />
+              <FormGroup label="Updates" fieldId="updates" role="group">
+                <Stack hasGutter id="updates">
+                  <Switch id="set-update" label="Check for a new version once a day" isChecked={s.updateCheck}
+                    onChange={(_e, v) => { set({ updateCheck: v }); }} />
+                  <Switch id="set-beta" label="Also offer beta versions (pre-releases)" isChecked={s.betaUpdates === true}
+                    onChange={(_e, v) => { set({ betaUpdates: v }).then(checkNow); }} />
+                  <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
+                    <FlexItem flex={{ default: 'flexNone' }}>
+                      <Button variant="secondary" onClick={checkNow} isLoading={checking} isDisabled={checking}>Check now</Button>
+                    </FlexItem>
+                    {check && <FlexItem className="update-result" aria-live="polite">{checkWords(check)}</FlexItem>}
+                    {check?.state === 'newer' && (
+                      <FlexItem><Button variant="link" isInline isDisabled={writing} onClick={onUpdate}>Update</Button></FlexItem>
+                    )}
+                  </Flex>
+                </Stack>
+              </FormGroup>
             )}
             <Switch id="set-reset" label="Restart the board after a Maskrom write" isChecked={s.resetAfterMaskrom}
-              onChange={(_e, v) => set({ resetAfterMaskrom: v })} />
+              onChange={(_e, v) => { set({ resetAfterMaskrom: v }); }} />
             <FormGroup label="Appearance" fieldId="appearance" role="group">
               <ToggleGroup aria-label="Appearance" id="appearance">
                 {(['system', 'light', 'dark'] as Theme[]).map((t) => (
@@ -697,7 +816,11 @@ export function App() {
   const [confirm, setConfirm] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const [settings, setSettings] = useState(false);
-  const [update, setUpdate] = useState<{ version: string; url: string } | null>(null);
+  const [offer, setOffer] = useState<UpdateOffer | null>(null);
+  const [updating, setUpdating] = useState(false);
+  // Closing the notice hides that version for good; Settings still offers it.
+  const [dismissed, setDismissed] = useState<string | null>(() => { try { return localStorage.getItem('updateDismissed'); } catch { return null; } });
+  const dismissUpdate = (v: string) => { setDismissed(v); try { localStorage.setItem('updateDismissed', v); } catch { /* no storage */ } };
   const [usbChoices, setUsbChoices] = useState<{ deviceId: string; productName?: string; productId: number }[] | null>(null);
   const maskromJob = useRef<MaskromJob | null>(null);
 
@@ -706,7 +829,13 @@ export function App() {
     api.loadCatalog({ sample: useSample }).then(setCatalog);
   }, [useSample]);
   useEffect(load, [load]);
-  useEffect(() => { api.checkUpdate(false).then(setUpdate); }, []);
+  // At start and then hourly: the main process checks at most once a day.
+  useEffect(() => {
+    const look = () => { api.checkUpdate(false).then((r) => { if (r?.state === 'newer') setOffer(r.offer); }); };
+    look();
+    const t = setInterval(look, 60 * 60 * 1000);
+    return () => clearInterval(t);
+  }, []);
   useEffect(() => api.onUsbChoice(setUsbChoices), []);
 
   const boards = useMemo(() => (catalog?.state === 'ok' ? groupByBoard(catalog.images) : []), [catalog]);
@@ -981,10 +1110,6 @@ export function App() {
   );
   const notices = (
     <>
-      {update && (
-        <Alert isInline variant="info" title={`Roxora Imager ${update.version} is available`}
-          actionLinks={<Button variant="link" isInline component="a" href={update.url} target="_blank">Release page</Button>} />
-      )}
       {noUsb}
       {sampleNote}
     </>
@@ -993,6 +1118,21 @@ export function App() {
 
   return (
     <Shell onSettings={() => setSettings(true)}>
+      {/* A newer version: above the wizard, never during a write. */}
+      {!run && offer && dismissed !== offer.version && (
+        <PageSection aria-label="Update" className="update-notice">
+          <Alert isInline variant="info" title={`Roxora Imager ${offer.version}${offer.beta ? ' (beta)' : ''} is available`}
+            actionClose={<AlertActionCloseButton onClose={() => dismissUpdate(offer.version)} />}
+            actionLinks={(
+              <>
+                <AlertActionLink onClick={() => setUpdating(true)}>Update</AlertActionLink>
+                <AlertActionLink component="a" href={offer.url} target="_blank">Release notes</AlertActionLink>
+              </>
+            )}>
+            {offer.notes}
+          </Alert>
+        </PageSection>
+      )}
       {run ? <RunView run={run} onCancel={cancel} onDone={finishRun} reconnect={reconnect} /> : (
         <PageSection type="wizard" isFilled hasBodyWrapper={false} aria-label="Write an image">
           <Wizard navAriaLabel="Steps" isVisitRequired header={<Jump to={jump} done={() => setJump(null)} />} onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
@@ -1087,7 +1227,9 @@ export function App() {
         </ModalBody>
       </Modal>
 
-      <SettingsModal open={settings} onClose={() => setSettings(false)} theme={theme} setTheme={setTheme} />
+      <SettingsModal open={settings} onClose={() => setSettings(false)} theme={theme} setTheme={setTheme}
+        onOffer={setOffer} onUpdate={() => { setSettings(false); setUpdating(true); }} writing={!!run && !run.result} />
+      <UpdateModal offer={updating && !(run && !run.result) ? offer : null} onClose={() => setUpdating(false)} />
     </Shell>
   );
 }
