@@ -89,7 +89,8 @@ export interface ParsedCatalog {
 }
 
 const HEX64 = /^[0-9a-f]{64}$/;
-const VERSION = /^\d{4}\.\d{2}\.\d+$/;
+/** YYYY.MM.N, or YYYY.MM.N-beta.N for a beta (roxora-os/build release.yml). */
+const VERSION = /^\d{4}\.\d{2}\.\d+(-beta\.\d+)?$/;
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 const NAME = /^[a-z0-9][a-z0-9-]*$/;
 
@@ -130,7 +131,7 @@ function parseRelease(raw: unknown, problems: string[]): CatalogRelease | null {
   const armbianRef = typeof raw.armbian_ref === 'string' ? raw.armbian_ref : '';
   const prerelease = raw.prerelease;
   if (typeof prerelease !== 'boolean') problems.push('release: "prerelease" is not a boolean');
-  if (version && !VERSION.test(version)) problems.push(`release: version "${version}" is not YYYY.MM.N`);
+  if (version && !VERSION.test(version)) problems.push(`release: version "${version}" is not YYYY.MM.N or YYYY.MM.N-beta.N`);
   if (tag && version && tag !== `v${version}`) problems.push(`release: tag "${tag}" does not match version "${version}"`);
   if (date && !DATE.test(date)) problems.push(`release: date "${date}" is not YYYY-MM-DD`);
   if (problems.length !== n || !tag || !version || !date || !url) return null;

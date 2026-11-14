@@ -56,6 +56,33 @@ describe('parseCatalog', () => {
     expect(parseCatalog({ schema: 1 }).problems).toEqual(['catalog: "release" is missing']);
   });
 
+  it('reads a beta catalog (version YYYY.MM.N-beta.N)', () => {
+    const c = real();
+    const from = c.release.version;
+    const to = `${from}-beta.1`;
+    c.release.version = to;
+    c.release.tag = `v${to}`;
+    c.release.prerelease = true;
+    for (const i of c.images) {
+      i.file = i.file.replace(from, to);
+      i.url = `https://github.com/roxora-os/build/releases/download/v${to}/${i.file}`;
+      if (i.spi) {
+        i.spi.file = i.spi.file.replace(from, to);
+        i.spi.url = `https://github.com/roxora-os/build/releases/download/v${to}/${i.spi.file}`;
+      }
+    }
+    const p = parseCatalog(c);
+    expect(p.problems).toEqual([]);
+    expect(p.images.length).toBe(c.images.length);
+    expect(p.images[0].releaseInfo.version).toBe(to);
+  });
+
+  it('refuses a version that is neither a release nor a beta', () => {
+    const c = real();
+    c.release.version = '2026.11.0-rc1';
+    expect(parseCatalog(c).problems.join(' ')).toMatch(/not YYYY.MM.N or YYYY.MM.N-beta.N/);
+  });
+
   it('drops an image whose url points outside the release', () => {
     const c = real();
     c.images[0].url = 'https://example.com/roxora-radxa-rock-4d-noble-edge-2026.11.0.img.xz';
