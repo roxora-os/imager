@@ -43,11 +43,17 @@ hardware either.
 
 Windows (x64), macOS (Apple silicon and Intel) and Linux (AppImage, .deb,
 .rpm; x86_64 and arm64) packages are attached to the
-[releases](https://github.com/roxora-os/imager/releases) once there is one;
-until then build it from source as below. On macOS and Linux:
+[releases](https://github.com/roxora-os/imager/releases). On macOS and Linux:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/roxora-os/imager/main/install.sh | sh
+```
+
+On macOS also with Homebrew:
+
+```sh
+brew trust gahingwoo/tap
+brew install --cask gahingwoo/tap/roxora-imager
 ```
 
 What each system asks on first start, and the drivers for Maskrom writing:
