@@ -119,7 +119,10 @@ export interface ImageSource {
 /** The decompressed image, through etcher-sdk's decompressors as in images.ts. */
 async function openImage(path: string): Promise<ImageSource> {
   // Not the index: it loads etcher-sdk's USB boot scanners (see write-helper.ts).
-  const sourceDestination = await import('etcher-sdk/build/source-destination');
+  // require(), not import(): the bundle is CommonJS, esbuild leaves import()
+  // of a module outside the bundle as it is, and Node.js then refuses the
+  // folder name (ERR_UNSUPPORTED_DIR_IMPORT).
+  const sourceDestination = require('etcher-sdk/build/source-destination') as typeof import('etcher-sdk/build/source-destination');
   const file = new sourceDestination.File({ path });
   const inner = await file.getInnerSource();
   const stream = await inner.createReadStream() as unknown as Readable;
