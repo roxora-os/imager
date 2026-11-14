@@ -29,6 +29,11 @@
   <url type="bugtracker">https://github.com/roxora-os/imager/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.1.2" date="2026-11-14">
+      <description>
+        <p>Writing no longer stops with a "file closed" error after the data is written, before the drive is read back.</p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-11-14">
       <description>
         <p>Writing an SD card or USB drive works again: the step that asks for administrator rights failed at once on every system.</p>

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2
+
+A pre-release, still not tested on hardware.
+
+- Fix: on macOS, writing an SD card could end with "The writer could not be
+  started" and "file closed" (EBADF) after the data was written, before the
+  card was read back. The image file was closed while a read on it was still
+  pending.
+
 ## 0.1.1
 
 A pre-release, still not tested on hardware.
