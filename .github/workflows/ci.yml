@@ -47,6 +47,8 @@ jobs:
       - run: npm run build
       - name: Maskrom path inside Electron against a pretend board
         run: xvfb-run -a node scripts/electron-maskrom-e2e.mjs
+      - name: Running on the board, inside Electron, against pretend boards (/proc and /sys in a folder)
+        run: xvfb-run -a node scripts/electron-board-e2e.mjs
       # The runner has no Chinese font: without one the zh-CN screenshots
       # come out as boxes.
       - name: A Chinese font for the zh-CN screenshots

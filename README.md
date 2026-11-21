@@ -188,16 +188,23 @@ entries are marked as samples and cannot be written.
 ```sh
 npm test                                   # catalog, targets, local image files, saving as a file, SPI file checks, Maskrom through the WASM, download proxy
 node scripts/electron-maskrom-e2e.mjs      # Maskrom path inside Electron
+node scripts/electron-board-e2e.mjs        # running on the board, against pretend boards
 node test/e2e/sd-loop.mjs                  # SD write to a loop device (Linux, sudo)
 node test/e2e/sd-ramdisk-mac.mjs           # SD write through authopen to a RAM disk (macOS, sudo; changes the authorization database, meant for CI)
 node --test test/webflash/*.test.js        # modules copied from edk2-webflash
-node scripts/shots.mjs dev/shots           # screenshots, light and dark
+node scripts/shots.mjs dev/shots           # screenshots, light and dark, English and Chinese
 node scripts/web-shots.mjs dev/web-shots   # the web version, served under /imager/
 ```
 
 The Maskrom tests use a pretend board (`test/fake-rockchip.ts`) that speaks
-enough of the Rockusb protocol for the commands the app sends. Real boards
-are tested by hand: [docs/hardware-test.md](docs/hardware-test.md).
+enough of the Rockusb protocol for the commands the app sends. The tests
+of running on the board use pretend boards too
+(`scripts/lib/pretend-board.mjs`): a folder laid out like `/proc` and
+`/sys` (device tree compatible strings or the SMBIOS product name, mmcblk
+card type, name and size, MTD devices, the mount table, and what lsblk
+would print), given to an unpackaged build as `ROXORA_IMAGER_FAKE_ROOT`,
+under which nothing is ever written. Real boards are tested by hand:
+[docs/hardware-test.md](docs/hardware-test.md).
 
 ## License
 

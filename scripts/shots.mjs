@@ -9,6 +9,7 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { PRETEND } from './lib/pretend-board.mjs';
 
 const out = process.argv[2] ?? 'dev/shots';
 mkdirSync(out, { recursive: true });
@@ -169,6 +170,52 @@ for (const lang of ['en', 'zh-CN']) for (const [w, h, tag] of [[1100, 760, 'd'],
     await shot('5-language');
     await page.keyboard.press('Escape');
     await app.close();
+  }
+}
+
+// Running on the board (main/board-here.ts), against pretend boards: a
+// CM5-IO running from its SD card (its eMMC is offered), the same board
+// running from its eMMC (refused, and the page says why), a ROCK 4D found by
+// its SMBIOS name (its SPI NOR flash), and one whose kernel shows no SPI
+// NOR flash. The CM5-IO in every size, theme and language; the others light.
+const pretend = { cm5io: PRETEND.cm5io(), cm5ioFromEmmc: PRETEND.cm5ioFromEmmc(), rock4d: PRETEND.rock4d(), rock4dNoMtd: PRETEND.rock4dNoMtd() };
+for (const lang of ['en', 'zh-CN']) for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
+  for (const [board, themes] of [['cm5io', ['light', 'dark']], ['cm5ioFromEmmc', ['light']], ['rock4d', ['light']], ['rock4dNoMtd', ['light']]]) {
+    for (const theme of themes) {
+      const suffix = lang === 'en' ? '' : `-${lang}`;
+      const where = `here-${board}-${tag}-${theme}${suffix}`;
+      const app = await electron.launch({ args: ['.', '--dev-sample'], env: { ...env, ROXORA_IMAGER_FAKE_ROOT: pretend[board] } });
+      const page = await app.firstWindow();
+      page.on('pageerror', (e) => errors.push(`${where}: ${e.message}`));
+      page.on('console', (m) => { if (m.type() === 'error') errors.push(`${where} console: ${m.text()}`); });
+      await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setContentSize(w, h), [w, h]);
+      await page.evaluate(([t, l]) => { localStorage.setItem('theme', t); localStorage.setItem('lang', l); }, [theme, lang]);
+      await page.reload();
+      await page.waitForSelector(`h2:has-text("${WORDS[lang].board}")`);
+      await page.waitForSelector('tr.pf-m-selected');
+      await page.waitForTimeout(500);
+      const shot = async (name) => {
+        await page.mouse.move(1, 1);
+        await page.waitForTimeout(400);
+        await layoutProblems(page, `${name}-${where}`);
+        const b64 = await app.evaluate(async ({ BrowserWindow }) =>
+          (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+        writeFileSync(`${out}/${name}-${tag}-${theme}${suffix}.png`, Buffer.from(b64, 'base64'));
+      };
+      const name = { cm5io: 'here', cm5ioFromEmmc: 'here-emmc-in-use', rock4d: 'here-spinor', rock4dNoMtd: 'here-no-mtd' }[board];
+      if (board === 'cm5io') await shot(`1-board-${name}`);
+      await page.click(next);
+      await page.click(next);
+      await page.waitForSelector('#method-here');
+      await page.locator(`h2:has-text("${WORDS[lang].destination}")`).scrollIntoViewIfNeeded();
+      await shot(`3-destination-${name}`);
+      if (board === 'cm5io' || board === 'rock4d') {
+        await page.click(next);
+        await page.waitForSelector(`h2:has-text("${WORDS[lang].review}")`);
+        await shot(`4-review-${name}`);
+      }
+      await app.close();
+    }
   }
 }
 

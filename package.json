@@ -17,6 +17,7 @@
     "icons": "node scripts/icons.mjs",
     "icons:make": "node scripts/make-icons.mjs",
     "e2e:maskrom": "node scripts/electron-maskrom-e2e.mjs",
+    "e2e:board": "node scripts/electron-board-e2e.mjs",
     "shots": "node scripts/shots.mjs dev/shots",
     "writer": "node scripts/build-writer.mjs",
     "build:web": "node scripts/build-web.mjs",
