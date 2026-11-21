@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- English and Simplified Chinese. The app follows the system's language
+  unless one is chosen: the masthead has a globe button with the current
+  language, which opens a Display language dialog as Cockpit's does, and
+  Settings has a Language toggle. The choice is remembered. Messages from
+  the main process, the writer and the Maskrom worker are shown in Chinese
+  where they are known; anything else stays in English.
 - Destination: a third choice, Save as an image file, saves the
   uncompressed .img in a folder you pick in the system's save dialog, for
   Ventoy and similar boot-from-file devices or a virtual machine. A release
