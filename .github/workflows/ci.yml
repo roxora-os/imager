@@ -36,6 +36,8 @@ jobs:
       - run: npm run typecheck
       - name: Unit tests (catalog, targets, Maskrom through the WASM against a pretend board)
         run: npm test
+      - name: App icons are what the SVGs give
+        run: node scripts/make-icons.mjs --check
       - name: Maskrom loader built from rkbin matches its pin
         run: node scripts/check-loader.mjs
       - name: Tests of the modules copied from edk2-webflash (xz, image source)

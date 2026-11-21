@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "icons": "node scripts/icons.mjs",
+    "icons:make": "node scripts/make-icons.mjs",
     "e2e:maskrom": "node scripts/electron-maskrom-e2e.mjs",
     "shots": "node scripts/shots.mjs dev/shots",
     "writer": "node scripts/build-writer.mjs",

@@ -1,7 +1,9 @@
-// Lay out the app icon for the packagers. The icon files in resources/icons/
-// are roxora-os/design's icons/imager/ copied unchanged, from design commit
+// Lay out the app icon for the packagers. The SVGs in resources/icons/ are
+// roxora-os/design's icons/imager/, from design commit
 // 8433eddd00b04aa2118cee4c535eaf41f72f2d37 ("Add imager icon PNG sizes");
-// nothing is rendered or recoloured here. Writes build-res/ (not committed):
+// the PNGs, the .ico and the .icns beside them are made from those SVGs by
+// scripts/make-icons.mjs and committed. Nothing is rendered here. Writes
+// build-res/ (not committed):
 //   icon.icns, icon.ico, icon.png        electron-builder (macOS, Windows, Linux)
 //   linux-icons/<n>x<n>.png              electron-builder's AppImage icon set
 //   hicolor/...                          what the .deb and .rpm install, named
