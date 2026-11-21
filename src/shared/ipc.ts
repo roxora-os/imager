@@ -62,6 +62,25 @@ export interface SaveTarget {
   free: number;
 }
 
+/** The board this app runs on, when it is one of maskrom/boards.ts (Linux; main/board-here.ts). */
+export interface BoardHereInfo {
+  boardId: string | null;
+  boardName: string | null;
+  compatible: string[];
+  smbiosProduct: string | null;
+  /** What the app may write on it. */
+  storages: Array<'emmc' | 'spinor'>;
+  emmc: { device: string; bytes: number; model: string; mounts: string[] } | null;
+  /** Why the eMMC is not offered, or null. */
+  emmcRefusal: string | null;
+  mtd: Array<{ device: string; name: string; bytes: number; mounts: string[] }>;
+  /** What to do when there is no SPI NOR flash to see. */
+  noMtdHelp: string;
+}
+
+/** Write this board's eMMC (the release image) or SPI NOR flash (the release's SPI bootloader). */
+export interface BoardWriteRequest { kind: 'emmc' | 'spinor'; imageId: string; device: string }
+
 export interface ImagerApi {
   platform: string;
   version: string;
@@ -91,6 +110,10 @@ export interface ImagerApi {
   saveImage?(what: SaveSubject, saveToken: string): Promise<JobResult>;
   /** Desktop only: show the saved file in the system's file manager. */
   showSavedFile?(saveToken: string): Promise<void>;
+  /** Desktop on Linux only: is this app running on one of the boards? */
+  boardHere?(): Promise<BoardHereInfo>;
+  /** Desktop on Linux only: write this board's own eMMC or SPI NOR flash (elevated helper). */
+  writeBoard?(req: BoardWriteRequest): Promise<JobResult>;
   cancel(): Promise<void>;
   onProgress(cb: (p: JobProgress) => void): () => void;
   prepareMaskrom(imageId: string, what?: 'image' | 'spi'): Promise<PreparedFile | { error: string }>;

@@ -18,7 +18,7 @@ import {
 } from '../shared/catalog';
 import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../shared/boardsearch';
 import { formatBytes, uncompressedName } from '../shared/format';
-import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
+import type { BoardHereInfo, CatalogResult, ImagerApi, JobResult, JobProgress, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
 import { INTERNAL_WORDS, type HiddenDrive, type Target } from '../shared/targets';
 import { APT_COMMAND, type UpdateCheck, type UpdateOffer, type UpdateResult } from '../shared/update';
 import { maskromBoard, STORAGES, type StorageId } from '../maskrom/boards';
@@ -57,7 +57,9 @@ const storageLabel = (t: T, s: StorageId) => t(`storage.${s}`);
 const flavorText = (t: T, f: string) => (MESSAGES[`flavor.${f}`] ? t(`flavor.${f}`) : flavorWords(f));
 const internalText = (t: T, k: keyof typeof INTERNAL_WORDS) => t(`internal.${k}`);
 
-type Method = 'sd' | 'maskrom' | 'file';
+/** 'here': the storage of the board this app runs on (main/board-here.ts). */
+type Method = 'sd' | 'maskrom' | 'file' | 'here';
+type HereStorage = 'emmc' | 'spinor';
 type MaskromSource = 'release' | 'spi' | 'file';
 /** A release file being downloaded or checked: what, and how far. */
 interface Checking { label: string; done: number; total: number }
@@ -531,6 +533,10 @@ function DriversNote() {
 function DestinationStep(p: {
   boardName: string; boardId: string; image: CatalogImage | undefined;
   method: Method; setMethod: (m: Method) => void;
+  /** The board this app runs on, when it is the chosen board; else null. */
+  here: BoardHereInfo | null; hereStorage: HereStorage | null; setHereStorage: (s: HereStorage) => void;
+  /** An image file from this computer is chosen (any, release or not): not written on the board. */
+  hasLocal: boolean;
   drives: { targets: Target[]; hidden: HiddenDrive[] } | null; refreshDrives: () => void;
   device: string | null; setDevice: (d: string) => void;
   /** Linux desktop: the "Show internal disks" switch, null where there is none. */
@@ -621,6 +627,11 @@ function DestinationStep(p: {
       <Form className="destination" onSubmit={(e) => e.preventDefault()}>
         {!WEB && (
           <FormGroup role="radiogroup" fieldId="method" label={t('dest.writeTo')} isStack>
+            {p.here && (
+              <Radio id="method-here" name="method" isChecked={p.method === 'here'} onChange={() => p.setMethod('here')}
+                isDisabled={p.hasLocal} label={t('dest.here')}
+                description={p.hasLocal ? t('dest.here.local') : t('dest.here.desc', { board: p.boardName, storages: p.here.storages.map((x) => storageLabel(t, x)).join(t('list.or')) })} />
+            )}
             <Radio id="method-sd" name="method" isChecked={p.method === 'sd'} onChange={() => p.setMethod('sd')}
               label={t('dest.sd')} description={t('dest.sd.desc')} />
             <Radio id="method-maskrom" name="method" isChecked={p.method === 'maskrom'} onChange={() => p.setMethod('maskrom')}
@@ -688,6 +699,27 @@ function DestinationStep(p: {
               <ExpandableSection toggleText={p.drives.hidden.length === 1 ? t('dest.hidden.one') : t('dest.hidden.many', { n: p.drives.hidden.length })}>
                 <Content component="ul">{p.drives.hidden.map((h) => <li key={h.device}>{h.device} {t('labelled', { a: h.description, b: msg(h.reason) })}</li>)}</Content>
               </ExpandableSection>
+            )}
+          </FormGroup>
+        )}
+
+        {p.method === 'here' && p.here && (
+          <FormGroup role="radiogroup" fieldId="here-storage" label={t('dest.storage')} isStack>
+            {p.here.storages.includes('emmc') && (
+              <Radio id="here-emmc" name="here-storage" isChecked={p.hereStorage === 'emmc'} onChange={() => p.setHereStorage('emmc')}
+                isDisabled={!p.here.emmc || !!p.here.emmcRefusal}
+                label={p.here.emmc ? t('dest.here.emmc', { model: p.here.emmc.model, device: p.here.emmc.device, size: formatBytes(p.here.emmc.bytes) }) : storageLabel(t, 'emmc')}
+                description={p.here.emmcRefusal ? msg(p.here.emmcRefusal)
+                  : p.image ? t('dest.here.emmc.desc', { file: p.image.file }) : undefined} />
+            )}
+            {p.here.storages.includes('spinor') && (
+              <Radio id="here-spinor" name="here-storage" isChecked={p.hereStorage === 'spinor'} onChange={() => p.setHereStorage('spinor')}
+                isDisabled={!p.here.mtd.length || !p.image?.spi || p.here.mtd[0].mounts.length > 0}
+                label={p.here.mtd.length ? t('dest.here.spinor', { device: p.here.mtd[0].device, size: formatBytes(p.here.mtd[0].bytes) }) : storageLabel(t, 'spinor')}
+                description={!p.here.mtd.length ? msg(p.here.noMtdHelp)
+                  : p.here.mtd[0].mounts.length ? t('dest.here.spinor.mounted', { device: p.here.mtd[0].device, mounts: p.here.mtd[0].mounts.join(', ') })
+                  : !p.image?.spi ? t('dest.src.spi.missing')
+                  : t('dest.here.spinor.desc', { file: p.image.spi.file })} />
             )}
           </FormGroup>
         )}
@@ -1081,6 +1113,9 @@ export function App() {
   // A built-in disk the user clicked, waiting for the extra confirmation.
   const [askInternal, setAskInternal] = useState<Target | null>(null);
   const [run, setRun] = useState<Run | null>(null);
+  // The board this app runs on, if it is one (Linux desktop only).
+  const [here, setHere] = useState<BoardHereInfo | null>(null);
+  const [hereStorage, setHereStorage] = useState<HereStorage | null>(null);
   const [settings, setSettings] = useState(false);
   const [offer, setOffer] = useState<UpdateOffer | null>(null);
   const [updating, setUpdating] = useState(false);
@@ -1103,6 +1138,7 @@ export function App() {
     return () => clearInterval(timer);
   }, []);
   useEffect(() => api.onUsbChoice(setUsbChoices), []);
+  useEffect(() => { if (!WEB) api.boardHere?.().then((h) => { if (h.boardId) setHere(h); }).catch(() => {}); }, []);
 
   const boards = useMemo(() => (catalog?.state === 'ok' ? groupByBoard(catalog.images) : []), [catalog]);
   const cur = boards.find((b) => b.board === board);
@@ -1112,6 +1148,11 @@ export function App() {
   // A file from this computer that no release vouches for.
   const custom = !!local && !local.imageId;
 
+  // The storage of this board that a write here goes to by default: the eMMC
+  // when it may be written, else the SPI NOR flash when Linux shows it.
+  const defaultHereStorage = (h: BoardHereInfo): HereStorage | null =>
+    (h.storages.includes('emmc') && h.emmc && !h.emmcRefusal ? 'emmc'
+      : h.storages.includes('spinor') && h.mtd.length ? 'spinor' : h.storages[0] ?? null);
   const chooseBoard = (b: string) => {
     if (b === board) return;
     setBoard(b);
@@ -1120,7 +1161,16 @@ export function App() {
     const m = maskromBoard(b);
     setStorage(m?.imageStorage ?? m?.storages[0] ?? null);
     setSource(defaultSource(m, bb?.images[0]));
+    // On the board itself, writing it there is what it is most likely for.
+    if (here?.boardId === b) { setMethod('here'); setHereStorage(defaultHereStorage(here)); }
+    else if (method === 'here') setMethod(WEB ? 'maskrom' : 'sd');
   };
+  // Running on a board the releases list: it is the board, unless one was chosen.
+  useEffect(() => {
+    if (here?.boardId && !board && !local && boards.some((b) => b.board === here.boardId)) chooseBoard(here.boardId);
+  }, [here, boards]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** This board, when it is the chosen one. */
+  const hereBoard = here && here.boardId === board ? here : null;
 
   // Another image of the same board may or may not carry an SPI bootloader.
   useEffect(() => {
@@ -1163,6 +1213,8 @@ export function App() {
       // Maskrom takes release images only; a custom file goes to a drive or a file.
       setMethod('sd');
     }
+    // The board's own storage takes the release's download only.
+    if (method === 'here') setMethod('sd');
     setJump('image');
   };
   const pickLocal = async () => {
@@ -1258,8 +1310,12 @@ export function App() {
       imageFiles: catalog?.state === 'ok' ? catalog.images.map((i) => i.file) : [],
       spiFile: image?.spi?.file ?? null,
     }) : null;
+  const hereMtd = hereBoard?.mtd[0];
   const destReady = method === 'sd' ? !!target
     : method === 'file' ? !!saveTarget && !saveShort
+    : method === 'here' ? !!hereBoard && !local && !!image && (hereStorage === 'emmc'
+      ? !!hereBoard.emmc && !hereBoard.emmcRefusal
+      : hereStorage === 'spinor' && !!hereMtd && !hereMtd.mounts.length && !!image.spi)
     : !!storage && (source === 'file' ? !!file && !spiProblem
       : source === 'spi' ? !!image?.spi && storage === 'spinor' && (!WEB || !!releaseFile)
         : !!image && !!mb?.wholeImage.includes(storage) && (!WEB || !!releaseFile));
@@ -1268,7 +1324,11 @@ export function App() {
   if (sample && !custom) why = method === 'file' ? t('why.sampleSave') : t('why.sampleWrite');
   else if (!destReady) why = t('why.dest');
 
-  const erasedWhat = method === 'file' ? '' : method === 'sd'
+  const erasedWhat = method === 'file' ? '' : method === 'here'
+    ? (hereStorage === 'emmc' && hereBoard?.emmc
+      ? t('erase.hereEmmc', { model: hereBoard.emmc.model, device: hereBoard.emmc.device, size: formatBytes(hereBoard.emmc.bytes) })
+      : hereStorage === 'spinor' && hereMtd ? t('erase.hereSpinor', { device: hereMtd.device, size: formatBytes(hereMtd.bytes) }) : '')
+    : method === 'sd'
     ? (target ? t(target.internal ? 'erase.sdInternal' : 'erase.sd', {
       kind: target.internal ? internalText(t, target.internal) : '', desc: target.description, device: target.device, size: formatBytes(target.size),
     }) : '')
@@ -1434,11 +1494,46 @@ export function App() {
           : { ok: true, warning: true, title: t('result.mrUnverifiedTitle'), text: t('result.mrUnverified', said) + restarting });
   };
 
+  // The board this runs on: its eMMC or SPI NOR flash, through the elevated helper.
+  const startHere = async () => {
+    if (!hereBoard || !image || !hereStorage || !api.writeBoard) return;
+    const spi = hereStorage === 'spinor';
+    const device = spi ? hereMtd?.device : hereBoard.emmc?.device;
+    if (!device) return;
+    const what = spi ? image.spi!.file : image.file;
+    setRun({
+      kind: 'sd', log: [], result: null,
+      stages: [
+        { id: 'download', percent: 0, label: t('stage.download') },
+        { id: 'write', label: t('stage.write', { device }), percent: 0 },
+        { id: 'verify', label: spi ? t('stage.verify') : t('stage.verifyRelease'), percent: 0 },
+      ],
+    });
+    const off = followProgress();
+    let res: JobResult;
+    try {
+      res = await api.writeBoard({ kind: hereStorage, imageId: image.id, device });
+    } catch (e) {
+      res = { ok: false, reason: t('run.errorWrite'), detail: String((e as Error)?.message ?? e) };
+    } finally {
+      off();
+    }
+    setRun((cur) => cur && {
+      ...cur,
+      result: res.ok
+        ? { ok: true, title: t('result.written'), text: spi ? t('result.hereSpinor', { name: what, device })
+          : t('result.hereEmmc', { name: what, device, sha: res.sha256 }) }
+        : { ok: false, title: res.reason, text: /Nothing was written/.test(res.reason) ? '' : spi ? t('result.hereSpinorPartly') : t('result.partly'),
+          ...(res.detail ? { detail: res.detail } : {}) },
+    });
+  };
+
   // A save erases nothing, so it needs no second question.
   const onWrite = () => { if (method === 'file') startSave(); else setConfirm(true); };
   const doWrite = () => {
     setConfirm(false);
     if (method === 'sd') { startSd(); return; }
+    if (method === 'here') { startHere(); return; }
     if (WEB) {
       // WebUSB only shows devices the user picked; this click is the gesture.
       navigator.usb.requestDevice({ filters: [{ vendorId: 0x2207 }] })
@@ -1468,10 +1563,14 @@ export function App() {
       {t('sample.text')}
     </Alert>
   );
+  const hereNote = here?.boardName && (
+    <Alert isInline variant="info" title={t('here.title', { board: here.boardName })}>{t('here.text')}</Alert>
+  );
   const notices = (
     <>
       {noUsb}
       {sampleNote}
+      {hereNote}
     </>
   );
   const writeNotices = <>{noUsb}{sampleNote}</>;
@@ -1510,6 +1609,7 @@ export function App() {
             <WizardStep name={t('step.dest')} id="dest" isDisabled={!imageId && !local} footer={{ ...stepButtons, isNextDisabled: !destReady, isCancelHidden: true, nextButtonText: t('step.review') }}>
               <DestinationStep boardName={cur?.boardName ?? ''} boardId={board ?? ''} image={image}
                 method={method} setMethod={(m) => { setMethod(m); if (m === 'sd') refreshDrives(); }}
+                here={hereBoard} hereStorage={hereStorage} setHereStorage={setHereStorage} hasLocal={!!local}
                 drives={drives} refreshDrives={refreshDrives} device={device} setDevice={chooseDevice}
                 showInternal={internalSwitch ? showInternal : null} setShowInternal={toggleInternal}
                 storage={storage} setStorage={(s) => { setStorage(s); setSource(mb?.wholeImage.includes(s) ? 'release' : s === 'spinor' && image?.spi ? 'spi' : 'file'); }}
@@ -1531,16 +1631,17 @@ export function App() {
                     <DescriptionListGroup><DescriptionListTerm>{t('review.release')}</DescriptionListTerm><DescriptionListDescription>{t('review.notRelease')}</DescriptionListDescription></DescriptionListGroup>
                   </>
                 )}
-                {!custom && (method !== 'maskrom' || source === 'release') && image && (
+                {!custom && (method === 'sd' || method === 'file' || (method === 'maskrom' && source === 'release')
+                  || (method === 'here' && hereStorage === 'emmc')) && image && (
                   <>
                     <DescriptionListGroup><DescriptionListTerm>{t('review.image')}</DescriptionListTerm><DescriptionListDescription>{image.file}</DescriptionListDescription></DescriptionListGroup>
                     <DescriptionListGroup><DescriptionListTerm>{t('review.release')}</DescriptionListTerm><DescriptionListDescription>{t('pair', { a: releaseWords(t, image), b: image.releaseInfo.date })}</DescriptionListDescription></DescriptionListGroup>
                   </>
                 )}
-                {method !== 'maskrom' && local?.imageId && (
+                {(method === 'sd' || method === 'file') && local?.imageId && (
                   <DescriptionListGroup><DescriptionListTerm>{t('review.file')}</DescriptionListTerm><DescriptionListDescription>{t('review.localMatch', { name: local.name })}</DescriptionListDescription></DescriptionListGroup>
                 )}
-                {method === 'maskrom' && source === 'spi' && image?.spi && (
+                {((method === 'maskrom' && source === 'spi') || (method === 'here' && hereStorage === 'spinor')) && image?.spi && (
                   <DescriptionListGroup><DescriptionListTerm>{t('review.spi')}</DescriptionListTerm><DescriptionListDescription>{t('review.spiFile', {
                     file: image.spi.file, size: formatBytes(image.spi.size), release: lang === 'en' ? releaseWords(t, image).toLowerCase() : releaseWords(t, image),
                   })}</DescriptionListDescription></DescriptionListGroup>
@@ -1554,6 +1655,9 @@ export function App() {
                 <DescriptionListGroup><DescriptionListTerm>{t('review.dest')}</DescriptionListTerm><DescriptionListDescription>
                   {method === 'sd' ? (target ? t('review.destSd', { desc: target.description, device: target.device, size: formatBytes(target.size) }) : '')
                     : method === 'file' ? (saveTarget ? (saveNeed ? t('pair', { a: saveTarget.path, b: formatBytes(saveNeed) }) : saveTarget.path) : '')
+                    : method === 'here' ? (hereStorage === 'emmc' && hereBoard?.emmc
+                      ? t('review.destHereEmmc', { model: hereBoard.emmc.model, device: hereBoard.emmc.device, size: formatBytes(hereBoard.emmc.bytes) })
+                      : hereMtd ? t('review.destHereSpinor', { device: hereMtd.device, size: formatBytes(hereMtd.bytes) }) : '')
                     : (storage ? t('review.destMaskrom', { storage: storageLabel(t, storage) }) : '')}
                 </DescriptionListDescription></DescriptionListGroup>
                 {method === 'file' && (
@@ -1561,6 +1665,7 @@ export function App() {
                 )}
                 <DescriptionListGroup><DescriptionListTerm>{t('review.checks')}</DescriptionListTerm><DescriptionListDescription>
                   {method === 'file' ? saveChecks
+                    : method === 'here' ? (hereStorage === 'spinor' ? t('checks.hereSpinor') : t('checks.hereEmmc'))
                     : custom ? t('checks.custom')
                     : method === 'sd' && local ? t('checks.sdLocal')
                     : method === 'sd' || source === 'release' || source === 'spi'

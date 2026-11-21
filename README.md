@@ -10,6 +10,10 @@ images in two ways, or saves them as a file:
   compares it with the release.
 - **Board storage over USB (Maskrom).** Writes a board's eMMC or SPI NOR
   flash through its USB-C port, with the same read-back check.
+- **This board** (Linux). Run on one of the boards, from an SD card or a
+  USB drive, the app recognises the board (device tree compatible strings,
+  or the SMBIOS product name under UEFI with ACPI) and writes its own eMMC
+  or SPI NOR flash directly, with no Maskrom and no second computer.
 - **Save as an image file.** Saves the uncompressed .img where you choose,
   for Ventoy and similar boot-from-file devices or a virtual machine. The
   download is checked as above, and the decompressed file against the
@@ -149,6 +153,15 @@ Safety rules:
 - Every write is read back and its SHA-256 compared with the release's
   `extract_sha256`, or for a custom image file with the SHA-256 of the
   file's own decompressed data.
+- This board (Linux only): only the board's own eMMC (the mmcblk whose
+  sysfs card type is `MMC`) or SPI NOR flash (an MTD device of type `nor`),
+  and only what `src/maskrom/boards.ts` lists for that board; only that
+  board's release image or SPI bootloader. The eMMC is refused while
+  anything on it is mounted or in use (so never when the system runs from
+  it), the flash while it is mounted. The elevated writer looks it all up
+  again before it writes, then the eMMC goes through the same built-in disk
+  check and read-back as any drive; the flash is written with flashcp,
+  which reads it back.
 - A Maskrom write names the storage (eMMC or SPI NOR) and fails before
   writing anything if the board does not switch to it or the image does not
   fit.

@@ -16,6 +16,8 @@ const api: ImagerApi = {
   pickSaveFile: (name) => ipcRenderer.invoke('save:pick', name),
   saveImage: (what, saveToken) => ipcRenderer.invoke('save:run', what, saveToken),
   showSavedFile: (saveToken) => ipcRenderer.invoke('save:show', saveToken),
+  boardHere: () => ipcRenderer.invoke('board:here'),
+  writeBoard: (req) => ipcRenderer.invoke('board:write', req),
   cancel: () => ipcRenderer.invoke('job:cancel'),
   onProgress: (cb) => {
     const h = (_e: unknown, p: JobProgress) => cb(p);

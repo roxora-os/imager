@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- This board: run on an ArmSoM CM5-IO or a Radxa ROCK 4D under Linux, the
+  app recognises the board (device tree or SMBIOS) and offers to write its
+  own storage directly, without Maskrom: the CM5-IO's eMMC with the release
+  image, the ROCK 4D's SPI NOR flash with the release's SPI bootloader
+  (flashcp, from mtd-utils). The eMMC is not offered while anything on it
+  is mounted, so not when the system runs from it. The elevated writer
+  checks the board, the device and what is mounted again before writing.
 - English and Simplified Chinese. The app follows the system's language
   unless one is chosen: the masthead has a globe button with the current
   language, which opens a Display language dialog as Cockpit's does, and

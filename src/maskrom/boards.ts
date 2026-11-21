@@ -42,12 +42,21 @@ export interface MaskromBoard {
   loader: string;
   /** Size of the board's SPI NOR flash in bytes, where it has one and the size is known. */
   spiFlashSize?: number;
+  /**
+   * How Linux running on the board names it (main/board-here.ts): device
+   * tree compatible strings, any one of which identifies the board, and the
+   * SMBIOS product names its UEFI firmware reports (edk2-rk3576), for a
+   * system booted with ACPI.
+   */
+  compatible: string[];
+  smbios: string[];
 }
 
 export const MASKROM_BOARDS: MaskromBoard[] = [
   {
     board: 'armsom-cm5-io', boardName: 'ArmSoM CM5-IO', soc: 'rk3576',
     storages: ['emmc', 'sd'], imageStorage: 'emmc', wholeImage: ['emmc', 'sd'], loader: 'rk3576_spl_loader.bin',
+    compatible: ['armsom,cm5-io'], smbios: ['CM5-IO'],
   },
   {
     board: 'radxa-rock-4d', boardName: 'Radxa ROCK 4D', soc: 'rk3576',
@@ -55,9 +64,33 @@ export const MASKROM_BOARDS: MaskromBoard[] = [
     spiFlashSize: 16 * 1024 * 1024,
     imageNote: 'SPI NOR flash is too small for a Roxora image; it takes the bootloader. '
       + 'Choose the SD card in the board for the whole image.',
+    compatible: ['radxa,rock-4d'], smbios: ['ROCK 4D'],
   },
 ];
 
 export function maskromBoard(board: string): MaskromBoard | undefined {
   return MASKROM_BOARDS.find((b) => b.board === board);
+}
+
+/** The board a device tree compatible list or an SMBIOS product name names, if any. */
+export function boardFromIds(compatible: string[], smbiosProduct: string | null): MaskromBoard | null {
+  for (const b of MASKROM_BOARDS) {
+    if (compatible.some((c) => b.compatible.includes(c))) return b;
+  }
+  const p = smbiosProduct?.trim().toLowerCase();
+  if (p) for (const b of MASKROM_BOARDS) if (b.smbios.some((s) => s.toLowerCase() === p)) return b;
+  return null;
+}
+
+/**
+ * What the app may write on the board it runs on: the eMMC where a whole
+ * image may go to it, and the SPI NOR flash (a bootloader) where the board
+ * has one. The SD card in the board's slot is not among them: it is what
+ * such a system usually runs from, and as a drive it is written like any other.
+ */
+export function onBoardStorages(b: MaskromBoard): Array<'emmc' | 'spinor'> {
+  const out: Array<'emmc' | 'spinor'> = [];
+  if (b.storages.includes('emmc') && b.wholeImage.includes('emmc')) out.push('emmc');
+  if (b.storages.includes('spinor')) out.push('spinor');
+  return out;
 }

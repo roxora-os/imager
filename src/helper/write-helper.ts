@@ -5,6 +5,9 @@
 //
 //   write-helper --socket PATH --token T --image FILE.img.xz --device DEV
 //                --extract-size N --extract-sha256 HEX [--allow-internal]
+//   write-helper --socket PATH --token T --job FILE.json
+//
+// The second form writes the board this runs on (helper/board-write.ts).
 //
 // It checks the target again (the app's list could be stale, and this
 // process trusts nothing it is told): on Linux with lsblk's view of every
@@ -25,6 +28,7 @@ import { guardReadsAfterClose } from './read-guard';
 import * as sourceDestination from 'etcher-sdk/build/source-destination';
 import { isOfferedTarget, type DriveInfo } from '../shared/targets';
 import { withDiskFacts } from '../main/linux-disks';
+import { parseJob, runBoardJob } from './board-write';
 
 export interface HelperArgs {
   socket: string;
@@ -151,6 +155,7 @@ export async function runWrite(a: HelperArgs, send: (m: HelperMessage) => void):
 }
 
 export async function main(argv: string[]): Promise<number> {
+  if (argv.includes('--job')) return boardMain(argv);
   let args: HelperArgs;
   try {
     args = parseArgs(argv);
@@ -170,6 +175,44 @@ export async function main(argv: string[]): Promise<number> {
   let code = 0;
   try {
     await runWrite(args, send);
+  } catch (e) {
+    send({ type: 'done', ok: false, reason: 'Writing stopped with an error.', detail: String((e as Error)?.message ?? e) });
+    code = 1;
+  }
+  await new Promise<void>((r) => sock.end(r));
+  return code;
+}
+
+/** The board this runs on: its eMMC or SPI NOR flash (board-write.ts). Linux only. */
+async function boardMain(argv: string[]): Promise<number> {
+  const get = (k: string) => {
+    const i = argv.indexOf(`--${k}`);
+    if (i < 0 || i + 1 >= argv.length) throw new Error(`missing --${k}`);
+    return argv[i + 1];
+  };
+  let job;
+  let socket: string;
+  let token: string;
+  try {
+    socket = get('socket');
+    token = get('token');
+    const { readFileSync } = await import('node:fs');
+    job = parseJob(readFileSync(get('job'), 'utf8'));
+  } catch (e) {
+    process.stderr.write(`write-helper: ${(e as Error).message}\n`);
+    return 2;
+  }
+  const sock: Socket = await new Promise((resolve, reject) => {
+    const s = connect(socket, () => resolve(s));
+    s.on('error', reject);
+  });
+  const send = (m: HelperMessage) => { sock.write(`${JSON.stringify(m)}\n`); };
+  send({ type: 'hello', token });
+  sock.on('data', (d) => { if (d.toString().includes('"cancel"')) process.exit(3); });
+  let code = 0;
+  try {
+    if (process.platform !== 'linux') send({ type: 'done', ok: false, reason: 'Writing the board this runs on works on Linux only.' });
+    else await runBoardJob(job, send, runWrite);
   } catch (e) {
     send({ type: 'done', ok: false, reason: 'Writing stopped with an error.', detail: String((e as Error)?.message ?? e) });
     code = 1;

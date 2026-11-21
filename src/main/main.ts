@@ -3,13 +3,15 @@
 
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, session, shell, type WebContents } from 'electron';
 import { randomBytes } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import * as drivelist from 'drivelist';
 import { formatBytes } from '../shared/format';
 import { classifyDrives, isOfferedTarget, type DriveInfo } from '../shared/targets';
 import { withDiskFacts } from './linux-disks';
-import type { JobProgress, JobResult, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
+import type { BoardHereInfo, BoardWriteRequest, JobProgress, JobResult, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
 import type { CatalogImage } from '../shared/catalog';
 import { partitionedSize } from '../maskrom/spi-check';
 import { loadReleases, loadSample, writableImage, writableImages, type CatalogState } from './catalog-source';
@@ -21,6 +23,8 @@ import { handleProtocol, ORIGIN, registerScheme } from './protocol';
 import { macWrite } from './mac-write';
 import { freeBytes, saveImage } from './save-image';
 import { loadSettings, saveSettings } from './settings';
+import { boardHere, boardRequestProblem, NO_MTD_HELP } from './board-here';
+import type { BoardJob } from '../helper/board-write';
 import { afterUpdateCleanup, cancelUpdate, checkForUpdate, installUpdate, restartApp } from './updater';
 import { installUsbHandlers, ROCKCHIP_VID, type UsbChoice } from './usb';
 
@@ -127,6 +131,72 @@ ipcMain.handle('drives:list', async (_e, minSize: number, internal?: boolean) =>
 });
 
 ipcMain.handle('job:cancel', () => { job?.abort(); });
+
+// --- the board this runs on (board-here.ts, helper/board-write.ts) -------------
+
+// Unpackaged builds only: a folder laid out like / that pretends to be a
+// board (scripts/shots.mjs, scripts/electron-board-e2e.mjs). Nothing is ever
+// written while it is set.
+const FAKE_ROOT = !app.isPackaged ? process.env.ROXORA_IMAGER_FAKE_ROOT : undefined;
+
+ipcMain.handle('board:here', async (): Promise<BoardHereInfo> => {
+  const h = await boardHere(FAKE_ROOT ?? '');
+  return {
+    boardId: h.board?.board ?? null, boardName: h.board?.boardName ?? null, compatible: h.compatible,
+    smbiosProduct: h.smbiosProduct, storages: h.storages,
+    emmc: h.emmc ? { device: h.emmc.device, bytes: h.emmc.bytes, model: h.emmc.model, mounts: h.emmc.mounts } : null,
+    emmcRefusal: h.emmcRefusal, mtd: h.mtd, noMtdHelp: NO_MTD_HELP,
+  };
+});
+
+ipcMain.handle('board:write', async (e, req: BoardWriteRequest): Promise<JobResult> => {
+  if (process.platform !== 'linux' && !FAKE_ROOT) return { ok: false, reason: 'Writing the board this runs on works on Linux only.' };
+  if (!req || (req.kind !== 'emmc' && req.kind !== 'spinor') || typeof req.device !== 'string' || typeof req.imageId !== 'string') {
+    return { ok: false, reason: 'Nothing was written.' };
+  }
+  // A pretend board takes the sample catalog as well: nothing is written there.
+  const img = writableImage(req.imageId)
+    ?? (FAKE_ROOT && lastCatalog?.state === 'ok' ? lastCatalog.images.find((i) => i.id === req.imageId) : undefined);
+  const problem = boardRequestProblem(await boardHere(FAKE_ROOT ?? ''), req, img, { pretend: !!FAKE_ROOT });
+  if (problem) return { ok: false, reason: problem };
+  if (FAKE_ROOT) return { ok: false, reason: 'This is a pretend board (ROXORA_IMAGER_FAKE_ROOT). Nothing was written.' };
+  if (job) return { ok: false, reason: 'Another write is running.' };
+  job = new AbortController();
+  const wc = e.sender;
+  const signal = job.signal;
+  const dir = mkdtempSync(join(tmpdir(), 'roxora-imager-board-'));
+  try {
+    let bj: BoardJob;
+    let total: number;
+    if (req.kind === 'emmc') {
+      const file = await fetchImage(img!, cacheDir(), (p) => sendProgress(wc, p), signal);
+      bj = { kind: 'emmc', boardId: img!.board, device: req.device, image: file, extractSize: img!.extractSize, extractSha256: img!.extractSha256 };
+      total = img!.extractSize;
+    } else {
+      const spi = img!.spi!;
+      const file = await fetchImage({ ...spi, sample: img!.sample }, cacheDir(), (p) => sendProgress(wc, p), signal);
+      if (await detectCompression(file) !== null) return { ok: false, reason: `${spi.file} is compressed; the SPI NOR flash takes a plain bootloader. Nothing was written.` };
+      bj = { kind: 'spinor', boardId: img!.board, device: req.device, image: file, size: spi.size, sha256: spi.sha256 };
+      total = spi.size;
+    }
+    const jobFile = join(dir, 'job.json');
+    writeFileSync(jobFile, JSON.stringify(bj), { mode: 0o600 });
+    const out = await runHelper({
+      signal,
+      launch: (d) => helperLaunch({ writerPath: writerPath(), dir: d, appImage: process.env.APPIMAGE }),
+      args: (socket, token) => ['--socket', socket, '--token', token, '--job', jobFile],
+      onMessage: (m) => { if (m.type === 'progress') sendProgress(wc, { stage: m.stage, bytes: m.bytes, total, speed: m.speed }); },
+      elevate: sudoPromptElevate,
+    });
+    return out.ok ? { ok: true, sha256: out.sha256 } : { ok: false, reason: out.reason, ...(out.detail ? { detail: out.detail } : {}) };
+  } catch (err) {
+    if (signal.aborted) return { ok: false, reason: 'Cancelled. Nothing was written.' };
+    return { ok: false, reason: String((err as Error).message ?? err) };
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    job = null;
+  }
+});
 
 /** Write an image file to a drive and read it back: macOS through authopen, else the elevated writer. */
 async function writeDrive(wc: WebContents, signal: AbortSignal,
