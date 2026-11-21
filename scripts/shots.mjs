@@ -1,5 +1,6 @@
 // Screenshots of the app's main steps, light and dark, at the default window
-// size and at the minimum width. Runs the built app hidden with the sample
+// size and at the minimum width, in English and in Simplified Chinese (the
+// Chinese pictures end in -zh-CN). Runs the built app hidden with the sample
 // catalog and stubs the drive list so no real disk appears in a picture.
 //   node scripts/shots.mjs OUT_DIR
 import { _electron as electron } from 'playwright-core';
@@ -21,24 +22,62 @@ const env = {
 delete env.ELECTRON_RUN_AS_NODE;
 const errors = [];
 
-for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
+// The words the main flow looks for, in each language (src/renderer/messages.ts).
+const WORDS = {
+  en: {
+    board: 'Board', destination: 'Destination', review: 'Review', nvme: 'NVMe drive: ', emmc: 'eMMC: ',
+    internalBody: 'is the built-in eMMC of this computer', cancel: 'Cancel', noPlace: 'No place chosen',
+    chooseSave: 'Choose where to save', erased: 'will be erased', sampleSave: 'Sample data cannot be saved.', settings: 'Settings',
+  },
+  'zh-CN': {
+    board: '开发板', destination: '目标', review: '确认', nvme: '内置 NVMe 硬盘：', emmc: '内置 eMMC：',
+    internalBody: '是这台电脑的内置 eMMC', cancel: '取消', noPlace: '未选择位置',
+    chooseSave: '选择保存位置', erased: '将被擦除', sampleSave: '示例数据不能保存。', settings: '设置',
+  },
+};
+const next = '.pf-v6-c-wizard__footer button.pf-m-primary';
+const back = '.pf-v6-c-wizard__footer button.pf-m-secondary';
+
+/** Is the page wider than the window, or does a button wrap its text? Both are layout bugs. */
+async function layoutProblems(page, where) {
+  const p = await page.evaluate(() => {
+    const wide = document.documentElement.scrollWidth > window.innerWidth;
+    const wrapped = [...document.querySelectorAll('button.pf-v6-c-button:not(.pf-m-plain):not(.pf-m-inline)')]
+      .filter((b) => b.offsetParent !== null)
+      .filter((b) => {
+        const text = b.querySelector('.pf-v6-c-button__text') ?? b;
+        const r = document.createRange();
+        r.selectNodeContents(text);
+        return new Set([...r.getClientRects()].map((c) => Math.round(c.top))).size > 1;
+      })
+      .map((b) => b.textContent.trim());
+    return { wide, wrapped, scrollWidth: document.documentElement.scrollWidth, width: window.innerWidth };
+  });
+  if (p.wide) errors.push(`${where}: the page is wider than the window (${p.scrollWidth} > ${p.width})`);
+  if (p.wrapped.length) errors.push(`${where}: button text wraps: ${p.wrapped.join(' | ')}`);
+}
+
+for (const lang of ['en', 'zh-CN']) for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
   for (const theme of ['light', 'dark']) {
+    const L = WORDS[lang];
+    const suffix = lang === 'en' ? '' : `-${lang}`;
     const app = await electron.launch({ args: ['.', '--dev-sample'], env });
     const page = await app.firstWindow();
-    page.on('pageerror', (e) => errors.push(`${tag}-${theme}: ${e.message}`));
-    page.on('console', (m) => { if (m.type() === 'error') errors.push(`${tag}-${theme} console: ${m.text()}`); });
+    page.on('pageerror', (e) => errors.push(`${tag}-${theme}${suffix}: ${e.message}`));
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(`${tag}-${theme}${suffix} console: ${m.text()}`); });
     await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setContentSize(w, h), [w, h]);
-    await page.evaluate((t) => { localStorage.setItem('theme', t); }, theme);
+    await page.evaluate(([t, l]) => { localStorage.setItem('theme', t); localStorage.setItem('lang', l); }, [theme, lang]);
     await page.reload();
-    await page.waitForSelector('h2:has-text("Board")');
+    await page.waitForSelector(`h2:has-text("${L.board}")`);
     await page.waitForTimeout(800);
     const shot = async (name) => {
       await page.mouse.move(1, 1); // no hover highlight in the pictures
       await page.waitForTimeout(400);
+      await layoutProblems(page, `${name}-${tag}-${theme}${suffix}`);
       // The window is hidden, so Playwright cannot screenshot it; ask Electron.
       const b64 = await app.evaluate(async ({ BrowserWindow }) =>
         (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
-      writeFileSync(`${out}/${name}-${tag}-${theme}.png`, Buffer.from(b64, 'base64'));
+      writeFileSync(`${out}/${name}-${tag}-${theme}${suffix}.png`, Buffer.from(b64, 'base64'));
     };
     await shot('1-board');
     // A vendor selected: the menu on wide windows, the select on narrow ones.
@@ -51,9 +90,9 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     await shot('1-board-search-none');
     await page.fill('.board-search input', 'rock4d');
     await page.press('.board-search input', 'Enter');
-    await page.click('.pf-v6-c-wizard__footer button:has-text("Next")');
+    await page.click(next);
     await shot('2-image');
-    await page.click('.pf-v6-c-wizard__footer button:has-text("Next")');
+    await page.click(next);
     await page.waitForSelector('text=SanDisk');
     await shot('3-destination-sd');
     if (process.platform === 'linux') {
@@ -63,16 +102,16 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
       // asks again, naming it.
       if (await page.locator('#drives >> text=A3A561').count()) throw new Error('a built-in disk is offered with the switch off');
       await page.click('label[for=show-internal]');
-      await page.waitForSelector('#drives >> text=NVMe drive: Samsung SSD 980 500GB');
-      await page.waitForSelector('#drives >> text=eMMC: A3A561');
+      await page.waitForSelector(`#drives >> text=${L.nvme}Samsung SSD 980 500GB`);
+      await page.waitForSelector(`#drives >> text=${L.emmc}A3A561`);
       if (await page.locator('#drives >> text=SD64G').count()) throw new Error('the SD card slot the system runs from is offered');
       // The layout: the switch in the Drive header, in the window and above
       // the list; removable drives first, then built-in disks; sizes on one line.
       const layout = await page.evaluate(() => {
         const sw = document.querySelector('.show-internal').getBoundingClientRect();
         const table = document.querySelector('#drives').getBoundingClientRect();
-        const devices = [...document.querySelectorAll('#drives tbody td[data-label="Device"]')].map((td) => td.textContent.trim());
-        const sizeLines = [...document.querySelectorAll('#drives tbody td[data-label="Size"]')].map((td) => {
+        const devices = [...document.querySelectorAll('#drives tbody td:nth-child(3)')].map((td) => td.textContent.trim());
+        const sizeLines = [...document.querySelectorAll('#drives tbody td:nth-child(4)')].map((td) => {
           const r = document.createRange();
           r.selectNodeContents(td);
           return new Set([...r.getClientRects()].map((c) => Math.round(c.top))).size;
@@ -86,21 +125,21 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
       const order = ['/dev/roxora-test-mmcblk0', '/dev/roxora-test-sdb', '/dev/roxora-test-mmcblk2', '/dev/roxora-test-nvme0n1'];
       if (JSON.stringify(layout.devices) !== JSON.stringify(order)) throw new Error(`drive order ${layout.devices.join(', ')}`);
       if (layout.sizeLines.some((n) => n !== 1)) throw new Error(`a size wraps: ${layout.sizeLines.join(', ')}`);
-      console.log(`internal disks ${tag}-${theme}: ${layout.devices.join(', ')}; switch at ${Math.round(layout.swTop)}-${Math.round(layout.swBottom)} of ${layout.height}, list from ${Math.round(layout.tableTop)}`);
+      console.log(`internal disks ${tag}-${theme}${suffix}: ${layout.devices.join(', ')}; switch at ${Math.round(layout.swTop)}-${Math.round(layout.swBottom)} of ${layout.height}, list from ${Math.round(layout.tableTop)}`);
       await shot('3-destination-internal');
-      await page.click('#drives >> text=eMMC: A3A561');
+      await page.click(`#drives >> text=${L.emmc}A3A561`);
       await page.waitForSelector('#internal-title');
       // has-text, not text=: a text= starting with / is read as a regular expression.
-      await page.waitForSelector('.pf-v6-c-modal-box__body:has-text("/dev/roxora-test-mmcblk2 is the built-in eMMC of this computer")');
+      await page.waitForSelector(`.pf-v6-c-modal-box__body:has-text("/dev/roxora-test-mmcblk2 ${L.internalBody}")`);
       await shot('3-destination-internal-confirm');
-      await page.click('.pf-v6-c-modal-box__footer button:has-text("Cancel")');
+      await page.click(`.pf-v6-c-modal-box__footer button:has-text("${L.cancel}")`);
       await page.click('label[for=show-internal]');
       await page.waitForSelector('#drives >> text=SanDisk');
     }
     await page.click('text=SanDisk');
-    await page.click('.pf-v6-c-wizard__footer button:has-text("Review")');
+    await page.click(next);
     await shot('4-review');
-    await page.click('.pf-v6-c-wizard__footer button:has-text("Back")');
+    await page.click(back);
     await page.click('label[for=method-maskrom]');
     await shot('3-destination-maskrom');
     await page.locator('#src-spi').scrollIntoViewIfNeeded();
@@ -108,21 +147,27 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     // Save as an image file: the third choice, then a place to save (the
     // app is told where; there is no dialog to click here), then the review.
     await page.click('label[for=method-file]');
-    await page.waitForSelector('text=No place chosen');
-    await page.locator('h2:has-text("Destination")').scrollIntoViewIfNeeded();
+    await page.waitForSelector(`text=${L.noPlace}`);
+    await page.locator(`h2:has-text("${L.destination}")`).scrollIntoViewIfNeeded();
     await shot('3-destination-file');
-    await page.click('button:has-text("Choose where to save")');
+    await page.click(`button:has-text("${L.chooseSave}")`);
     await page.waitForSelector(`.file-row:has-text("${saveTo}")`);
     await shot('3-destination-file-chosen');
-    await page.click('.pf-v6-c-wizard__footer button:has-text("Review")');
-    await page.waitForSelector('h2:has-text("Review")');
-    if (await page.locator('text=will be erased').count()) throw new Error('the review of a save says something will be erased');
-    if (!(await page.locator('.pf-v6-c-wizard__footer button:has-text("Save")').count())) throw new Error('the review of a save has no Save button');
-    await page.waitForSelector('text=Sample data cannot be saved.');
+    await page.click(next);
+    await page.waitForSelector(`h2:has-text("${L.review}")`);
+    if (await page.locator(`text=${L.erased}`).count()) throw new Error('the review of a save says something will be erased');
+    if (!(await page.locator('.pf-v6-c-wizard__footer button.pf-m-primary').count())) throw new Error('the review of a save has no Save button');
+    await page.waitForSelector(`text=${L.sampleSave}`);
     await shot('4-review-file');
-    await page.click('.pf-v6-c-masthead button:has-text("Settings")');
+    await page.click(`.pf-v6-c-masthead button:has-text("${L.settings}")`);
     await page.waitForSelector('#settings-title');
     await shot('5-settings');
+    await page.keyboard.press('Escape');
+    // The Display language dialog: a globe and the language's own name in the masthead.
+    await page.click('.pf-v6-c-masthead .lang-button');
+    await page.waitForSelector('#lang-dialog');
+    await shot('5-language');
+    await page.keyboard.press('Escape');
     await app.close();
   }
 }
@@ -131,7 +176,7 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
 {
   const app = await electron.launch({ args: ['.'], env: { ...env, ROXORA_IMAGER_SAMPLE: '0', ROXORA_IMAGER_FAKE_RELEASES: 'none' } });
   const page = await app.firstWindow();
-  await page.evaluate(() => { localStorage.setItem('theme', 'light'); });
+  await page.evaluate(() => { localStorage.setItem('theme', 'light'); localStorage.setItem('lang', 'en'); });
   await page.reload();
   await page.waitForSelector('text=No Roxora releases yet');
   await page.waitForTimeout(500);
@@ -151,7 +196,7 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
   page.on('pageerror', (e) => errors.push(`custom-${tag}: ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error') errors.push(`custom-${tag} console: ${m.text()}`); });
   await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setContentSize(w, h), [w, h]);
-  await page.evaluate(() => { localStorage.setItem('theme', 'light'); });
+  await page.evaluate(() => { localStorage.setItem('theme', 'light'); localStorage.setItem('lang', 'en'); });
   await page.reload();
   await page.waitForSelector('h2:has-text("Board")');
   const shot = async (name) => {
@@ -206,7 +251,7 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     page.on('pageerror', (e) => errors.push(`save-${tag}-${theme}: ${e.message}`));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(`save-${tag}-${theme} console: ${m.text()}`); });
     await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setContentSize(w, h), [w, h]);
-    await page.evaluate((t) => { localStorage.setItem('theme', t); }, theme);
+    await page.evaluate((t) => { localStorage.setItem('theme', t); localStorage.setItem('lang', 'en'); }, theme);
     await page.reload();
     await page.waitForSelector('h2:has-text("Board")');
     const shot = async (name) => {
@@ -252,7 +297,7 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     page.on('pageerror', (e) => errors.push(`update-${fake}-${tag}: ${e.message}`));
     page.on('console', (m) => { if (m.type() === 'error') errors.push(`update-${fake}-${tag} console: ${m.text()}`); });
     await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setContentSize(w, h), [w, h]);
-    await page.evaluate(() => { localStorage.setItem('theme', 'light'); localStorage.removeItem('updateDismissed'); });
+    await page.evaluate(() => { localStorage.setItem('theme', 'light'); localStorage.setItem('lang', 'en'); localStorage.removeItem('updateDismissed'); });
     await page.reload();
     await page.waitForSelector('h2:has-text("Board")');
     const shot = async (name) => {

@@ -45,7 +45,11 @@ jobs:
       - run: npm run build
       - name: Maskrom path inside Electron against a pretend board
         run: xvfb-run -a node scripts/electron-maskrom-e2e.mjs
-      - name: Screenshots
+      # The runner has no Chinese font: without one the zh-CN screenshots
+      # come out as boxes.
+      - name: A Chinese font for the zh-CN screenshots
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-cjk
+      - name: Screenshots (English and Simplified Chinese)
         run: |
           xvfb-run -a node scripts/shots.mjs shots
           xvfb-run -a node scripts/web-shots.mjs shots/web
