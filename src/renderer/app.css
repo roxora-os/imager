@@ -137,3 +137,11 @@ html, body, #root { height: 100%; }
 /* PatternFly leaves focus to the browser's outline (inset on a search box);
    give it PatternFly's focus colour instead of the system accent. */
 :focus-visible { outline-color: var(--pf-t--global--focus-ring--color--default); }
+
+/* Every dialog's backdrop blurs what is behind it, so the dialog reads as
+   the one thing to deal with; not when the system asks for less
+   transparency. */
+.pf-v6-c-backdrop { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+@media (prefers-reduced-transparency: reduce) {
+  .pf-v6-c-backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}
