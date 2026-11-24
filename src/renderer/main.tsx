@@ -4,6 +4,7 @@ import './app.css';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import { followSystem } from './theme';
+import { I18nProvider } from './i18n';
 
 followSystem();
 // The desktop app: one scroll container per view, and text selection only
@@ -19,4 +20,4 @@ if ((window as unknown as { imager?: { platform?: string } }).imager?.platform !
     }
   }, true);
 }
-createRoot(document.getElementById('root')!).render(<App />);
+createRoot(document.getElementById('root')!).render(<I18nProvider><App /></I18nProvider>);

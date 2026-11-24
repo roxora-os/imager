@@ -81,6 +81,16 @@ stand-ins).
 | ![Destination step: an SD card or USB drive, or the board's own storage over USB in Maskrom mode](docs/screenshots/3-destination-dark.webp) | ![Review step: what will be written where, and the checks before and after](docs/screenshots/4-review-dark.webp) |
 | 3. Destination: SD card or USB drive, or the board over USB | 4. Review: what is erased, and how it is checked |
 
+## Languages
+
+The app, and its web version, are in English and Simplified Chinese. They
+follow the system language until you pick one with the language button in
+the masthead or in Settings (kept on this computer). The texts are in
+`src/renderer/messages.ts`, keyed by the English text, and a test fails
+when a text the page shows has no Chinese. Messages from the writer and
+the Maskrom sequence are shown in Chinese where they are known; any other
+stays in English. `src/shared/i18n.ts` is shared with Maskrom Studio.
+
 ## Install
 
 Windows (x64 and arm64), macOS (Apple silicon and Intel) and Linux

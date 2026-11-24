@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Simplified Chinese. The page follows the system language until one is
+  chosen in the Display language dialog (the globe in the masthead) or in
+  Settings. Known messages from the writer and the Maskrom sequence are
+  shown in Chinese too.
 - Maskrom, eMMC: write a vendor's Rockchip update.img (a factory firmware
   package): read and refused for another chip, its MD5 checked, then its
   partition table, loader and partitions written as RKDevTool's Upgrade
