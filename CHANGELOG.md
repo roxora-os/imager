@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Homebrew: a `roxora-imager@nightly` cask for the CI builds next to
+  `roxora-imager`, both written by `scripts/bump-cask.mjs`; a release opens
+  the pull request to the tap. The in-app update knows which cask it came
+  from, upgrades the nightly one with `--greedy`, and says how to switch
+  casks when the tier and the cask disagree.
 - Release tiers for the app's own updates, in Settings: Stable, Prerelease
   and CI, in place of the beta switch (beta on becomes Prerelease). CI is
   the rolling `ci` release, an untested build of main that the Release

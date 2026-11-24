@@ -21,7 +21,7 @@ import { existsSync, mkdtempSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
-  APT_COMMAND, APT_PACKAGE, aptRepoCarries, assetSha256, BREW_COMMAND, brewCaskOwns, checkDue, installKind, judgeChannel,
+  APT_COMMAND, APT_PACKAGE, aptRepoCarries, assetSha256, BREW_CASK, brewCaskName, brewCommand, checkDue, installKind, judgeChannel,
   pickAsset,
   type AppRelease, type InstallKind, type ReleaseAsset, type UpdateCheck, type UpdateResult,
 } from '../shared/update';
@@ -52,6 +52,8 @@ export function afterUpdateCleanup(): void {
 }
 
 let install: { kind: InstallKind; arch: string } | null = null;
+/** The tap's cask this copy came from, when Homebrew installed it. */
+let brewCask: string | null = null;
 /** How this copy was installed, and for which CPU. Looked up once. */
 export function detectInstall(): { kind: InstallKind; arch: string } {
   if (install) return install;
@@ -60,7 +62,7 @@ export function detectInstall(): { kind: InstallKind; arch: string } {
   const dpkg = platform === 'linux' && !process.env.APPIMAGE && owns('dpkg-query', ['-S', exe]);
   const kind = installKind({
     platform, packaged: app.isPackaged, appImage: process.env.APPIMAGE,
-    brew: platform === 'darwin' && brewCaskOwns(exe.replace(/\/Contents\/MacOS\/[^/]+$/, ''), { realpath: realpathSync, readdir: readdirSync }),
+    brew: platform === 'darwin' && (brewCask = brewCaskName(exe.replace(/\/Contents\/MacOS\/[^/]+$/, ''), { realpath: realpathSync, readdir: readdirSync })) !== null,
     nsis: platform === 'win32' && existsSync(join(dirname(exe), 'Uninstall Roxora Imager.exe')),
     dpkg,
     rpm: platform === 'linux' && !process.env.APPIMAGE && owns('rpm', ['-qf', exe]),
@@ -163,7 +165,7 @@ async function bundleVersion(): Promise<string | null> {
 /** Download and install what the last check offered. Called only after the user confirmed. */
 export async function installUpdate(wc: WebContents): Promise<UpdateResult> {
   // The screenshots: as on a Mac without Homebrew.
-  if (FAKE) return { ok: false, reason: 'Homebrew was not found on this Mac. You can update in Terminal:', command: BREW_COMMAND };
+  if (FAKE) return { ok: false, reason: 'Homebrew was not found on this Mac. You can update in Terminal:', command: brewCommand() };
   const o = offered;
   if (!o) return { ok: false, reason: 'Check for a new version again.' };
   if (running) return { ok: false, reason: 'An update is already being downloaded.' };
@@ -172,16 +174,25 @@ export async function installUpdate(wc: WebContents): Promise<UpdateResult> {
   const stage = (name: string) => send('update:stage', name);
   if (o.kind === 'brew') {
     // As the user, never as root; brew refuses root anyway.
+    const cask = brewCask ?? BREW_CASK;
+    // The CI tier comes from the nightly cask, the other two from the stable
+    // one: a copy from the other cask has to be swapped, which the user does.
+    const wantNightly = loadSettings().appChannel === 'ci';
+    if (wantNightly !== cask.endsWith('@nightly')) {
+      const other = wantNightly ? 'roxora-imager@nightly' : BREW_CASK;
+      return { ok: false, reason: `This copy came from the Homebrew cask ${cask}, which does not carry ${wantNightly ? 'CI builds' : 'releases'}. Switch to ${other} in Terminal:`,
+        command: `brew uninstall --cask ${cask} && brew install --cask gahingwoo/tap/${other}` };
+    }
     running = new AbortController();
     try {
       const brew = await findBrew();
-      if (!brew) return { ok: false, reason: 'Homebrew was not found on this Mac. You can update in Terminal:', command: BREW_COMMAND };
+      if (!brew) return { ok: false, reason: 'Homebrew was not found on this Mac. You can update in Terminal:', command: brewCommand(cask) };
       const r = await brewUpgrade({
-        brew, runningVersion: app.getVersion(), installedVersion: bundleVersion, onLog: log, signal: running.signal,
+        brew, cask, runningVersion: app.getVersion(), installedVersion: bundleVersion, onLog: log, signal: running.signal,
         onStage: (st) => stage(st === 'update' ? 'brew-update' : 'brew-upgrade'),
       });
       if (r.ok) return { ok: true, restart: true, message: `Homebrew installed Roxora Imager ${o.release.tag_name.replace(/^v/, '')}. Restart to use it.` };
-      return r.cancelled ? { ok: false, reason: r.reason } : { ok: false, reason: `${r.reason} Its output is below. You can also update in Terminal:`, command: BREW_COMMAND };
+      return r.cancelled ? { ok: false, reason: r.reason } : { ok: false, reason: `${r.reason} Its output is below. You can also update in Terminal:`, command: brewCommand(cask) };
     } finally {
       running = null;
     }

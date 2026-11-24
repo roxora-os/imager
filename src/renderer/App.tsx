@@ -23,7 +23,7 @@ import { formatBytes, uncompressedName } from '../shared/format';
 import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
 import type { CacheInfo } from '../main/cache';
 import { INTERNAL_WORDS, type HiddenDrive, type Target } from '../shared/targets';
-import { APT_COMMAND, type UpdateCheck, type UpdateOffer, type UpdateResult } from '../shared/update';
+import { APT_COMMAND, brewCommand, type UpdateCheck, type UpdateOffer, type UpdateResult } from '../shared/update';
 import { CHANNELS, type Channel } from '../shared/channel';
 import { maskromBoard, STORAGES, type StorageId } from '../maskrom/boards';
 import { RKBIN_HOST } from '../maskrom/loaders';
@@ -817,7 +817,7 @@ function updatePlan(o: UpdateOffer): string {
   const file = o.asset ? `${o.asset.name} (${formatBytes(o.asset.size)})` : '';
   const checked = 'checks it against the SHA-256 GitHub lists for it';
   switch (o.kind) {
-    case 'brew': return 'This copy was installed with Homebrew. Roxora Imager runs Homebrew for you: "brew update", then "brew upgrade --cask roxora-imager". You then restart the app.';
+    case 'brew': return `This copy was installed with Homebrew. Roxora Imager runs Homebrew for you: "brew update", then "${brewCommand(o.ci ? 'roxora-imager@nightly' : undefined)}". You then restart the app.`;
     case 'dmg': return `Roxora Imager downloads ${file} to your Downloads folder, ${checked}, and puts the new app in place of this one. You then restart the app.`;
     case 'windows': return `Roxora Imager downloads the installer ${file}, ${checked}, then closes and starts the installer.`;
     case 'appimage': return `Roxora Imager downloads ${file}, ${checked}, and puts it in place of the AppImage you are running. You then restart the app.`;
@@ -870,7 +870,7 @@ function UpdateModal({ offer, onClose }: { offer: UpdateOffer | null; onClose: (
           {brew && !canInstall && (
             <>
               <Content component="p">This copy was installed with Homebrew. Update it in Terminal with:</Content>
-              <CopyBlock text="brew upgrade --cask roxora-imager" />
+              <CopyBlock text={brewCommand(offer.ci ? 'roxora-imager@nightly' : undefined)} />
             </>
           )}
           {apt && (

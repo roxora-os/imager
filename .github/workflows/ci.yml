@@ -83,6 +83,25 @@ jobs:
         run: node test/e2e/sd-ramdisk-mac.mjs
       - name: In-app update, swap the app for the one in a DMG (real hdiutil, ditto, xattr)
         run: node test/e2e/update-dmg-mac.mjs
+      # The casks of gahingwoo/homebrew-tap as scripts/bump-cask.mjs writes
+      # them (made-up checksums for the tagged one), in a local tap, through
+      # brew's own style check and an offline audit.
+      - name: Homebrew casks pass brew style and audit
+        run: |
+          set -eux
+          mkdir -p /tmp/casks
+          node scripts/bump-cask.mjs ci /tmp/casks
+          node --input-type=module -e "
+            import { taggedCask } from './scripts/bump-cask.mjs';
+            import { writeFileSync } from 'node:fs';
+            const c = taggedCask('v0.2.0', { arm: 'a'.repeat(64), intel: 'b'.repeat(64) });
+            writeFileSync('/tmp/casks/' + c.name + '.rb', c.text);"
+          brew tap-new --no-git local/check
+          mkdir -p "$(brew --repository local/check)/Casks"
+          cp /tmp/casks/*.rb "$(brew --repository local/check)/Casks/"
+          brew style local/check
+          brew trust local/check || true
+          for c in roxora-imager roxora-imager@nightly; do brew audit --cask --strict "local/check/$c"; done
 
   sd-e2e:
     name: SD write to a loop device

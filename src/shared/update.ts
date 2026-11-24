@@ -149,30 +149,45 @@ export function aptRepoCarries(policy: string): boolean {
 }
 
 export const BREW_CASK = 'roxora-imager';
-export const BREW_COMMAND = `brew upgrade --cask ${BREW_CASK}`;
+/** The tap's casks (gahingwoo/homebrew-tap, scripts/bump-cask.mjs): stable, and nightly (the ci release). */
+export const BREW_CASKS = ['roxora-imager', 'roxora-imager@nightly'];
+/** The command that updates a cask; a nightly one is version :latest, which brew upgrades only with --greedy. */
+export const brewCommand = (cask = BREW_CASK) => `brew upgrade --cask ${cask.endsWith('@nightly') ? '--greedy ' : ''}${cask}`;
+export const BREW_COMMAND = brewCommand();
 
 /**
- * Is the app bundle at `appPath` one a Homebrew cask installed? Either it
- * lies inside a Caskroom, or (what Homebrew does today: the app is moved to
- * /Applications and a link is left behind) a Caskroom holds a link to it.
+ * Which of the tap's casks installed the app bundle at `appPath`, or null.
+ * Either the bundle lies inside a Caskroom, or (what Homebrew does today:
+ * the app is moved to /Applications and a link is left behind) a Caskroom
+ * holds a link to it.
  */
-export function brewCaskOwns(appPath: string, fs: {
+export function brewCaskName(appPath: string, fs: {
   realpath: (p: string) => string; readdir: (p: string) => string[];
-}, prefixes: string[] = ['/opt/homebrew', '/usr/local']): boolean {
+}, prefixes: string[] = ['/opt/homebrew', '/usr/local']): string | null {
   const real = (p: string) => { try { return fs.realpath(p); } catch { return null; } };
   const app = real(appPath) ?? appPath;
-  if (/\/Caskroom\/[^/]+\//.test(app) || /\/Caskroom\/[^/]+\//.test(appPath)) return true;
+  for (const p of [app, appPath]) {
+    const m = /\/Caskroom\/([^/]+)\//.exec(p);
+    if (m) return m[1];
+  }
   for (const prefix of prefixes) {
-    const room = `${prefix}/Caskroom/${BREW_CASK}`;
-    let versions: string[];
-    try { versions = fs.readdir(room); } catch { continue; }
-    for (const v of versions) {
-      let entries: string[];
-      try { entries = fs.readdir(`${room}/${v}`); } catch { continue; }
-      if (entries.some((e) => e.endsWith('.app') && real(`${room}/${v}/${e}`) === app)) return true;
+    for (const cask of BREW_CASKS) {
+      const room = `${prefix}/Caskroom/${cask}`;
+      let versions: string[];
+      try { versions = fs.readdir(room); } catch { continue; }
+      for (const v of versions) {
+        let entries: string[];
+        try { entries = fs.readdir(`${room}/${v}`); } catch { continue; }
+        if (entries.some((e) => e.endsWith('.app') && real(`${room}/${v}/${e}`) === app)) return cask;
+      }
     }
   }
-  return false;
+  return null;
+}
+
+/** Is the app bundle at `appPath` one a Homebrew cask installed? */
+export function brewCaskOwns(appPath: string, fs: { realpath: (p: string) => string; readdir: (p: string) => string[] }, prefixes?: string[]): boolean {
+  return brewCaskName(appPath, fs, prefixes) !== null;
 }
 
 /** The release file for this kind of install and CPU ('x64' or 'arm64'), as release.yml names them. */

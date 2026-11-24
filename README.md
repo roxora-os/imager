@@ -94,6 +94,10 @@ brew trust gahingwoo/tap
 brew install --cask gahingwoo/tap/roxora-imager
 ```
 
+`gahingwoo/tap/roxora-imager@nightly` is the latest build of main instead
+(untested; the app's CI tier). Releasing, the casks and the `ci` release:
+[docs/release.md](docs/release.md).
+
 The app looks for a newer version once a day and offers to install it
 (Settings has "Check now" and the switch to turn the check off). Which
 releases it offers is the release tier in Settings: **Stable** (the
