@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Settings shows how much the downloaded images and the Maskrom loaders
+  take, and has Clear cache: a dialog lists what is deleted and the folder,
+  and the freed size is shown. Both come back when needed. Not while a
+  write runs.
 - The window is never taller or wider than the screen's work area (on a
   1366x768 laptop at 125% it ran past the bottom of the screen), and can
   be made as small as 720x480. Static text and the page chrome no longer

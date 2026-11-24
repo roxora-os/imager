@@ -75,6 +75,11 @@ export function serveFileAs(token: string, path: string): void {
   served.set(token, { path, size: statSync(path).size });
 }
 
+/** The paths being served now. */
+export function servedPaths(): string[] {
+  return [...served.values()].map((f) => f.path);
+}
+
 export function servedFile(token: string) {
   return served.get(token);
 }

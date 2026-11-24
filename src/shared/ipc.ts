@@ -2,6 +2,7 @@
 import type { CatalogImage } from './catalog';
 import type { HiddenDrive, Target } from './targets';
 import type { UpdateCheck, UpdateResult } from './update';
+import type { CacheInfo, ClearResult } from '../main/cache';
 
 export type CatalogResult =
   | { state: 'ok'; images: CatalogImage[]; problems: string[]; sample: boolean }
@@ -125,6 +126,10 @@ export interface ImagerApi {
   answerUsbChoice(deviceId: string): void;
   getSettings(): Promise<{ updateCheck: boolean; betaUpdates?: boolean; resetAfterMaskrom: boolean }>;
   setSettings(s: { updateCheck?: boolean; betaUpdates?: boolean; resetAfterMaskrom?: boolean }): Promise<void>;
+  /** Desktop only: what the downloads and the Maskrom loaders take in the user data folder. */
+  cacheInfo?(): Promise<CacheInfo>;
+  /** Desktop only: delete them; refused while a write runs. */
+  clearCache?(): Promise<ClearResult>;
   /**
    * Is a newer version out? `force`: the user asked; otherwise at most once
    * a day, and null when there is nothing to say. The web build is always

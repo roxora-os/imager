@@ -14,7 +14,8 @@ import type { CatalogImage } from '../shared/catalog';
 import { partitionedSize } from '../maskrom/spi-check';
 import { loadReleases, loadSample, writableImage, writableImages, type CatalogState } from './catalog-source';
 import { helperLaunch, runHelper, sudoPromptElevate } from './elevate';
-import { decompress, detectCompression, fetchImage, forgetFile, serveFile, serveFileAs } from './images';
+import { decompress, detectCompression, fetchImage, forgetFile, serveFile, serveFileAs, servedPaths } from './images';
+import { cacheInfo, clearCache, inCache } from './cache';
 import { ensureLoader } from './loader-cache';
 import { describeLocal, measureFile, sha256OfFile } from './local-image';
 import { handleProtocol, ORIGIN, registerScheme } from './protocol';
@@ -443,6 +444,14 @@ ipcMain.handle('settings:set', (_e, patch: { updateCheck?: boolean; betaUpdates?
     ...(typeof patch.resetAfterMaskrom === 'boolean' ? { resetAfterMaskrom: patch.resetAfterMaskrom } : {}),
   });
 });
+ipcMain.handle('cache:info', () => cacheInfo(app.getPath('userData')));
+ipcMain.handle('cache:clear', () => {
+  const data = app.getPath('userData');
+  // A job may be downloading into the cache; a file served to the Maskrom
+  // worker (while it writes) may be a cached image itself.
+  return clearCache(data, { busy: job !== null || servedPaths().some((p) => inCache(data, p)) });
+});
+
 ipcMain.handle('update:check', (_e, force: boolean) => checkForUpdate(force === true));
 // Only after the user pressed Update and confirmed (the page asks), and never during a write.
 ipcMain.handle('update:install', (e) => (job

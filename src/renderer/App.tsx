@@ -3,7 +3,7 @@ import {
   ActionList, ActionListGroup, ActionListItem, Alert, AlertActionCloseButton, AlertActionLink, Button, CodeBlock, CodeBlockAction, CodeBlockCode, Content, DescriptionList,
   DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, EmptyState, EmptyStateActions, EmptyStateBody,
   EmptyStateFooter, ExpandableSection, Flex, FlexItem, Form, FormGroup, FormHelperText, FormSection, FormSelect, FormSelectOption,
-  HelperText, HelperTextItem, Masthead,
+  HelperText, HelperTextItem, List, ListItem, Masthead,
   MastheadBrand, MastheadContent, MastheadLogo, MastheadMain, Modal, ModalBody, ModalFooter, ModalHeader, Page,
   PageSection, Progress, ProgressMeasureLocation, Radio, SearchInput, Sidebar, SidebarContent, SidebarPanel, SimpleList,
   SimpleListItem,
@@ -19,6 +19,7 @@ import {
 import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../shared/boardsearch';
 import { formatBytes, uncompressedName } from '../shared/format';
 import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
+import type { CacheInfo } from '../main/cache';
 import { INTERNAL_WORDS, type HiddenDrive, type Target } from '../shared/targets';
 import { APT_COMMAND, type UpdateCheck, type UpdateOffer, type UpdateResult } from '../shared/update';
 import { maskromBoard, STORAGES, type StorageId } from '../maskrom/boards';
@@ -941,7 +942,23 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
   const [s, setS] = useState<AppSettings | null>(null);
   const [check, setCheck] = useState<UpdateCheck | null>(null);
   const [checking, setChecking] = useState(false);
-  useEffect(() => { if (open) { api.getSettings().then(setS); setCheck(null); } }, [open]);
+  const [cache, setCache] = useState<CacheInfo | null>(null);
+  const [clearAsk, setClearAsk] = useState(false);
+  const [cleared, setCleared] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    api.getSettings().then(setS);
+    setCheck(null);
+    setCleared(null);
+    api.cacheInfo?.().then(setCache);
+  }, [open]);
+  const cacheBytes = cache ? cache.images.bytes + cache.loaders.bytes : 0;
+  const doClear = async () => {
+    const r = await api.clearCache!();
+    setClearAsk(false);
+    setCleared(r.ok ? `Cleared: ${formatBytes(r.freed)} freed.` : r.reason);
+    api.cacheInfo?.().then(setCache);
+  };
   const set = (patch: Partial<AppSettings>) => {
     setS((cur) => (cur ? { ...cur, ...patch } : cur));
     return api.setSettings(patch);
@@ -954,6 +971,7 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
     if (r?.state === 'newer') onOffer(r.offer);
   };
   return (
+    <>
     <Modal isOpen={open} onClose={onClose} variant="small" aria-labelledby="settings-title">
       <ModalHeader title="Settings" labelId="settings-title" />
       <ModalBody>
@@ -989,6 +1007,21 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
                   onChange={(_e, v) => { set({ resetAfterMaskrom: v }); }} />
               </FormGroup>
             </FormSection>
+            {api.cacheInfo && (
+              <FormSection title="Downloads" titleElement="h3">
+                <FormGroup fieldId="clear-cache">
+                  <Content component="p">{cache
+                    ? `${formatBytes(cacheBytes)} in downloaded images and Maskrom loaders (files: ${cache.images.files + cache.loaders.files}), downloaded or built again when needed.`
+                    : 'Measuring the downloads.'}</Content>
+                  <Flex><FlexItem>
+                    <Button id="clear-cache" variant="secondary" isDisabled={writing || !cache || cacheBytes === 0} onClick={() => setClearAsk(true)}>Clear cache</Button>
+                  </FlexItem></Flex>
+                  {(writing || cleared) && (
+                    <FormHelperText><HelperText><HelperTextItem>{writing ? 'Not while a write is running.' : cleared}</HelperTextItem></HelperText></FormHelperText>
+                  )}
+                </FormGroup>
+              </FormSection>
+            )}
             <FormSection title="Appearance" titleElement="h3">
               <FormGroup fieldId="appearance" label="Theme" role="group">
                 <ToggleGroup aria-label="Theme" id="appearance">
@@ -1012,6 +1045,26 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
       </ModalBody>
       <ModalFooter><Button variant="primary" onClick={onClose}>Close</Button></ModalFooter>
     </Modal>
+    {clearAsk && cache && (
+      <Modal isOpen onClose={() => setClearAsk(false)} variant="small" aria-labelledby="clear-title">
+        <ModalHeader title="Clear the cache?" labelId="clear-title" />
+        <ModalBody>
+          <Stack hasGutter>
+            <Content component="p">These are deleted, from {cache.images.dir.replace(/[\\/]images$/, '')}:</Content>
+            <List>
+              <ListItem>Downloaded images: {formatBytes(cache.images.bytes)}, files: {cache.images.files}{cache.images.names.length ? ` (${cache.images.names.join(', ')})` : ''}</ListItem>
+              <ListItem>Maskrom loaders built from rkbin: {formatBytes(cache.loaders.bytes)}, files: {cache.loaders.files}</ListItem>
+            </List>
+            <Content component="p">The settings are kept.</Content>
+          </Stack>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="danger" onClick={doClear}>Delete {formatBytes(cacheBytes)}</Button>
+          <Button variant="link" onClick={() => setClearAsk(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+    )}
+    </>
   );
 }
 
