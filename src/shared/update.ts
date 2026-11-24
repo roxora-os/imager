@@ -176,13 +176,13 @@ export function pickAsset(assets: ReleaseAsset[] | undefined, kind: InstallKind,
   const a64 = arch === 'arm64';
   const pattern: Partial<Record<InstallKind, RegExp>> = {
     dmg: a64 ? /-macos-arm64\.dmg$/ : /-macos-x86_64\.dmg$/,
-    windows: /-windows-x64-setup\.exe$/,
+    windows: a64 ? /-windows-arm64-setup\.exe$/ : /-windows-x64-setup\.exe$/,
     appimage: a64 ? /-linux-arm64\.AppImage$/ : /-linux-x86_64\.AppImage$/,
     deb: a64 ? /_arm64\.deb$/ : /_amd64\.deb$/,
     rpm: a64 ? /\.aarch64\.rpm$/ : /\.x86_64\.rpm$/,
   };
   const re = pattern[kind];
-  if (!re || (arch !== 'x64' && arch !== 'arm64') || (kind === 'windows' && a64)) return null;
+  if (!re || (arch !== 'x64' && arch !== 'arm64')) return null;
   return (assets ?? []).find((a) => typeof a?.name === 'string' && re.test(a.name) && !/[\\/]/.test(a.name)) ?? null;
 }
 

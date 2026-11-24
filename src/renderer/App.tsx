@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ActionList, ActionListGroup, ActionListItem, Alert, AlertActionCloseButton, AlertActionLink, Button, CodeBlock, CodeBlockAction, CodeBlockCode, Content, DescriptionList,
   DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, EmptyState, EmptyStateActions, EmptyStateBody,
-  EmptyStateFooter, ExpandableSection, Flex, FlexItem, Form, FormGroup, FormSelect, FormSelectOption, Masthead,
+  EmptyStateFooter, ExpandableSection, Flex, FlexItem, Form, FormGroup, FormHelperText, FormSection, FormSelect, FormSelectOption,
+  HelperText, HelperTextItem, List, ListItem, Masthead,
   MastheadBrand, MastheadContent, MastheadLogo, MastheadMain, Modal, ModalBody, ModalFooter, ModalHeader, Page,
   PageSection, Progress, ProgressMeasureLocation, Radio, SearchInput, Sidebar, SidebarContent, SidebarPanel, SimpleList,
   SimpleListItem,
@@ -11,6 +13,7 @@ import {
   useWizardContext,
 } from '@patternfly/react-core';
 import { CogIcon } from '@patternfly/react-icons/dist/esm/icons/cog-icon';
+import { TimesIcon } from '@patternfly/react-icons/dist/esm/icons/times-icon';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import {
   compareImages, flavorWords, groupByBoard, splitByRelease, type Board, type CatalogImage, type CatalogRelease, type ImageSortKey,
@@ -18,6 +21,7 @@ import {
 import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../shared/boardsearch';
 import { formatBytes, uncompressedName } from '../shared/format';
 import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
+import type { CacheInfo } from '../main/cache';
 import { INTERNAL_WORDS, type HiddenDrive, type Target } from '../shared/targets';
 import { APT_COMMAND, type UpdateCheck, type UpdateOffer, type UpdateResult } from '../shared/update';
 import { maskromBoard, STORAGES, type StorageId } from '../maskrom/boards';
@@ -929,8 +933,10 @@ function checkWords(c: UpdateCheck): string {
 
 type AppSettings = { updateCheck: boolean; betaUpdates?: boolean; resetAfterMaskrom: boolean };
 
-function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writing }: {
+function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writing, onAbout }: {
   open: boolean; onClose: () => void; theme: Theme; setTheme: (t: Theme) => void;
+  /** Open About Roxora Imager. */
+  onAbout: () => void;
   /** A check found a newer version. */
   onOffer: (o: UpdateOffer) => void;
   /** The user wants it. */
@@ -940,7 +946,23 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
   const [s, setS] = useState<AppSettings | null>(null);
   const [check, setCheck] = useState<UpdateCheck | null>(null);
   const [checking, setChecking] = useState(false);
-  useEffect(() => { if (open) { api.getSettings().then(setS); setCheck(null); } }, [open]);
+  const [cache, setCache] = useState<CacheInfo | null>(null);
+  const [clearAsk, setClearAsk] = useState(false);
+  const [cleared, setCleared] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    api.getSettings().then(setS);
+    setCheck(null);
+    setCleared(null);
+    api.cacheInfo?.().then(setCache);
+  }, [open]);
+  const cacheBytes = cache ? cache.images.bytes + cache.loaders.bytes : 0;
+  const doClear = async () => {
+    const r = await api.clearCache!();
+    setClearAsk(false);
+    setCleared(r.ok ? `Cleared: ${formatBytes(r.freed)} freed.` : r.reason);
+    api.cacheInfo?.().then(setCache);
+  };
   const set = (patch: Partial<AppSettings>) => {
     setS((cur) => (cur ? { ...cur, ...patch } : cur));
     return api.setSettings(patch);
@@ -953,51 +975,162 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
     if (r?.state === 'newer') onOffer(r.offer);
   };
   return (
+    <>
     <Modal isOpen={open} onClose={onClose} variant="small" aria-labelledby="settings-title">
       <ModalHeader title="Settings" labelId="settings-title" />
       <ModalBody>
         {s && (
           <Form onSubmit={(e) => e.preventDefault()}>
             {!WEB && (
-              <FormGroup label="Updates" fieldId="updates" role="group">
-                <Stack hasGutter id="updates">
+              <FormSection title="Updates" titleElement="h3">
+                <FormGroup fieldId="set-update" label="Automatic check" hasNoPaddingTop>
                   <Switch id="set-update" label="Check for a new version once a day" isChecked={s.updateCheck}
                     onChange={(_e, v) => { set({ updateCheck: v }); }} />
-                  <Switch id="set-beta" label="Also offer beta versions (pre-releases)" isChecked={s.betaUpdates === true}
+                </FormGroup>
+                <FormGroup fieldId="set-beta" label="Beta versions" hasNoPaddingTop>
+                  <Switch id="set-beta" label="Also offer beta versions" isChecked={s.betaUpdates === true}
                     onChange={(_e, v) => { set({ betaUpdates: v }).then(checkNow); }} />
+                  <FormHelperText><HelperText><HelperTextItem>Pre-releases on GitHub, before they become a normal release.</HelperTextItem></HelperText></FormHelperText>
+                </FormGroup>
+                <FormGroup fieldId="check-now">
                   <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
                     <FlexItem flex={{ default: 'flexNone' }}>
-                      <Button variant="secondary" onClick={checkNow} isLoading={checking} isDisabled={checking}>Check now</Button>
+                      <Button id="check-now" variant="secondary" onClick={checkNow} isLoading={checking} isDisabled={checking}>Check now</Button>
                     </FlexItem>
                     {check && <FlexItem className="update-result" aria-live="polite">{checkWords(check)}</FlexItem>}
                     {check?.state === 'newer' && (
                       <FlexItem><Button variant="link" isInline isDisabled={writing} onClick={onUpdate}>Update</Button></FlexItem>
                     )}
                   </Flex>
-                </Stack>
-              </FormGroup>
+                </FormGroup>
+              </FormSection>
             )}
-            <Switch id="set-reset" label="Restart the board after a Maskrom write" isChecked={s.resetAfterMaskrom}
-              onChange={(_e, v) => { set({ resetAfterMaskrom: v }); }} />
-            <FormGroup label="Appearance" fieldId="appearance" role="group">
-              <ToggleGroup aria-label="Appearance" id="appearance">
-                {(['system', 'light', 'dark'] as Theme[]).map((t) => (
-                  <ToggleGroupItem key={t} text={t[0].toUpperCase() + t.slice(1)} isSelected={theme === t} onChange={() => setTheme(t)} />
-                ))}
-              </ToggleGroup>
-            </FormGroup>
-            <DescriptionList isCompact isHorizontal>
-              <DescriptionListGroup><DescriptionListTerm>Version</DescriptionListTerm><DescriptionListDescription>{api.version}</DescriptionListDescription></DescriptionListGroup>
-              <DescriptionListGroup><DescriptionListTerm>License</DescriptionListTerm><DescriptionListDescription>GPL-2.0</DescriptionListDescription></DescriptionListGroup>
-              <DescriptionListGroup><DescriptionListTerm>Source</DescriptionListTerm><DescriptionListDescription>
-                <Button variant="link" isInline component="a" href="https://github.com/roxora-os/imager" target="_blank">github.com/roxora-os/imager</Button>
-              </DescriptionListDescription></DescriptionListGroup>
-            </DescriptionList>
+            <FormSection title="Maskrom" titleElement="h3">
+              <FormGroup fieldId="set-reset" label="After writing" hasNoPaddingTop>
+                <Switch id="set-reset" label="Restart the board after a Maskrom write" isChecked={s.resetAfterMaskrom}
+                  onChange={(_e, v) => { set({ resetAfterMaskrom: v }); }} />
+              </FormGroup>
+            </FormSection>
+            {api.cacheInfo && (
+              <FormSection title="Downloads" titleElement="h3">
+                <FormGroup fieldId="clear-cache">
+                  <Content component="p">{cache
+                    ? `${formatBytes(cacheBytes)} in downloaded images and Maskrom loaders (files: ${cache.images.files + cache.loaders.files}), downloaded or built again when needed.`
+                    : 'Measuring the downloads.'}</Content>
+                  <Flex><FlexItem>
+                    <Button id="clear-cache" variant="secondary" isDisabled={writing || !cache || cacheBytes === 0} onClick={() => setClearAsk(true)}>Clear cache</Button>
+                  </FlexItem></Flex>
+                  {(writing || cleared) && (
+                    <FormHelperText><HelperText><HelperTextItem>{writing ? 'Not while a write is running.' : cleared}</HelperTextItem></HelperText></FormHelperText>
+                  )}
+                </FormGroup>
+              </FormSection>
+            )}
+            <FormSection title="Appearance" titleElement="h3">
+              <FormGroup fieldId="appearance" label="Theme" role="group">
+                <ToggleGroup aria-label="Theme" id="appearance">
+                  {(['system', 'light', 'dark'] as Theme[]).map((t) => (
+                    <ToggleGroupItem key={t} text={t[0].toUpperCase() + t.slice(1)} isSelected={theme === t} onChange={() => setTheme(t)} />
+                  ))}
+                </ToggleGroup>
+              </FormGroup>
+            </FormSection>
+            <FormSection title="Version" titleElement="h3">
+              <FormGroup fieldId="about-open">
+                <Content component="p">{api.version}</Content>
+                <Flex><FlexItem>
+                  <Button id="about-open" variant="link" isInline onClick={onAbout}>About Roxora Imager</Button>
+                </FlexItem></Flex>
+              </FormGroup>
+            </FormSection>
           </Form>
         )}
       </ModalBody>
       <ModalFooter><Button variant="primary" onClick={onClose}>Close</Button></ModalFooter>
     </Modal>
+    {clearAsk && cache && (
+      <Modal isOpen onClose={() => setClearAsk(false)} variant="small" aria-labelledby="clear-title">
+        <ModalHeader title="Clear the cache?" labelId="clear-title" />
+        <ModalBody>
+          <Stack hasGutter>
+            <Content component="p">These are deleted, from {cache.images.dir.replace(/[\\/]images$/, '')}:</Content>
+            <List>
+              <ListItem>Downloaded images: {formatBytes(cache.images.bytes)}, files: {cache.images.files}{cache.images.names.length ? ` (${cache.images.names.join(', ')})` : ''}</ListItem>
+              <ListItem>Maskrom loaders built from rkbin: {formatBytes(cache.loaders.bytes)}, files: {cache.loaders.files}</ListItem>
+            </List>
+            <Content component="p">The settings are kept.</Content>
+          </Stack>
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="danger" onClick={doClear}>Delete {formatBytes(cacheBytes)}</Button>
+          <Button variant="link" onClick={() => setClearAsk(false)}>Cancel</Button>
+        </ModalFooter>
+      </Modal>
+    )}
+    </>
+  );
+}
+
+declare const __BUILD_COMMIT__: string;
+declare const __BUILD_DATE__: string;
+declare const __PATTERNFLY_VERSION__: string;
+const BUILD = {
+  commit: typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : 'unknown',
+  date: typeof __BUILD_DATE__ === 'string' ? __BUILD_DATE__ : '',
+  patternfly: typeof __PATTERNFLY_VERSION__ === 'string' ? __PATTERNFLY_VERSION__ : '',
+};
+
+/**
+ * About Roxora Imager: PatternFly's about modal box with the facts of this
+ * build. Every row has to be true for the build that shows it.
+ */
+function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const close = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    close.current?.focus();
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [open, onClose]);
+  if (!open) return null;
+  const link = (href: string, text: string) => <a href={href} target="_blank" rel="noreferrer">{text}</a>;
+  const rows: Array<[string, React.ReactNode]> = [
+    ['Version', `${api.version} (${BUILD.commit}${BUILD.date ? `, ${BUILD.date}` : ''})`],
+    ['Design system', BUILD.patternfly ? `PatternFly ${BUILD.patternfly}` : 'PatternFly'],
+    ...(WEB ? [] : [
+      ['Network', `GitHub (the Roxora releases and this app's updates), and ${RKBIN_HOST} once for Rockchip's rkbin. No analytics or telemetry.`],
+      ['Kept on your device', <>Settings and downloads, in <span className="selectable">{api.dataDir}</span>; Settings has Clear cache</>],
+    ] as Array<[string, React.ReactNode]>),
+    ['Licence', 'GPL-2.0-only'],
+    ['Source', link('https://github.com/roxora-os/imager', 'github.com/roxora-os/imager')],
+  ];
+  // On the document body, as PatternFly's Modal does, so the backdrop covers the masthead too.
+  return createPortal(
+    <div className="pf-v6-c-backdrop about-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="pf-v6-l-bullseye">
+        <div className="pf-v6-c-about-modal-box" role="dialog" aria-modal="true" aria-labelledby="about-title">
+          <div className="pf-v6-c-about-modal-box__brand"><img src="resources/roxora-mark.svg" alt="" className="about-mark" /></div>
+          <div className="pf-v6-c-about-modal-box__close">
+            <Button ref={close} variant="plain" aria-label="Close About Roxora Imager" icon={<TimesIcon />} onClick={onClose} />
+          </div>
+          <div className="pf-v6-c-about-modal-box__header">
+            <h1 className="pf-v6-c-title pf-m-2xl" id="about-title">About Roxora Imager</h1>
+          </div>
+          <div className="pf-v6-c-about-modal-box__content">
+            <dl className="pf-v6-c-description-list pf-m-horizontal">
+              {rows.map(([k, v]) => (
+                <div className="pf-v6-c-description-list__group" key={k}>
+                  <dt className="pf-v6-c-description-list__term"><span className="pf-v6-c-description-list__text">{k}</span></dt>
+                  <dd className="pf-v6-c-description-list__description"><div className="pf-v6-c-description-list__text">{v}</div></dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1038,6 +1171,7 @@ export function App() {
   const [askInternal, setAskInternal] = useState<Target | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [settings, setSettings] = useState(false);
+  const [about, setAbout] = useState(false);
   const [offer, setOffer] = useState<UpdateOffer | null>(null);
   const [updating, setUpdating] = useState(false);
   // Closing the notice hides that version for good; Settings still offers it.
@@ -1571,7 +1705,9 @@ export function App() {
       </Modal>
 
       <SettingsModal open={settings} onClose={() => setSettings(false)} theme={theme} setTheme={setTheme}
-        onOffer={setOffer} onUpdate={() => { setSettings(false); setUpdating(true); }} writing={!!run && !run.result} />
+        onOffer={setOffer} onUpdate={() => { setSettings(false); setUpdating(true); }} writing={!!run && !run.result}
+        onAbout={() => { setSettings(false); setAbout(true); }} />
+      <AboutModal open={about} onClose={() => setAbout(false)} />
       <UpdateModal offer={updating && !(run && !run.result) ? offer : null} onClose={() => setUpdating(false)} />
     </Shell>
   );

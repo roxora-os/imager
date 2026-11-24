@@ -2,6 +2,29 @@
    Stack, Flex and Form; what is here is only what PatternFly has no option for. */
 html, body, #root { height: 100%; }
 
+/* The desktop app (main.tsx sets .desktop; the web build is a web page and
+   keeps a browser's behaviour). One scroll container per view: the
+   wizard's main column in the wizard, PatternFly's page main elsewhere (the
+   run view), the modal body in a dialog. The document itself never
+   scrolls, so a wheel anywhere over the content reaches the element that
+   can move. */
+:root.desktop, :root.desktop body, :root.desktop #root { overflow: hidden; }
+:root.desktop .pf-v6-c-page { height: 100%; }
+
+/* Not a web page either: the chrome and static text are not selectable by a
+   stray drag or a double click, and Ctrl+A in it selects nothing
+   (main.tsx). What people copy stays selectable: fields, code and logs,
+   file paths and details, alert texts (the results, with their SHA-256),
+   error messages, description values (the review, Settings). */
+:root.desktop body { user-select: none; -webkit-user-select: none; }
+:root.desktop :is(input, textarea, [contenteditable="true"],
+  .pf-v6-c-code-block, .pf-v6-c-code-block *, .detail, .selectable,
+  .pf-v6-c-alert__title, .pf-v6-c-alert__description,
+  .pf-v6-c-helper-text__item.pf-m-error,
+  .pf-v6-c-description-list__description) {
+  user-select: text; -webkit-user-select: text;
+}
+
 /* Roxora's colours in place of PatternFly's blue and grey, the same as the
    website's (roxora-os.github.io, assets/site.css). Only palette
    steps that PatternFly's semantic tokens point at are replaced, so every
@@ -114,3 +137,47 @@ html, body, #root { height: 100%; }
 /* PatternFly leaves focus to the browser's outline (inset on a search box);
    give it PatternFly's focus colour instead of the system accent. */
 :focus-visible { outline-color: var(--pf-t--global--focus-ring--color--default); }
+
+/* About Roxora Imager: PatternFly's about modal box sized to its rows
+   (about 44rem wide, as tall as the content), no artwork behind the text,
+   the product layout's large paddings and right-hand column taken out. */
+.about-backdrop .pf-v6-c-about-modal-box {
+  --pf-v6-c-about-modal-box--BackgroundImage: none;
+  --pf-v6-c-about-modal-box--Height: auto;
+  --pf-v6-c-about-modal-box--lg--Height: auto;
+  --pf-v6-c-about-modal-box--sm--GridTemplateColumns: 1fr auto;
+  --pf-v6-c-about-modal-box--lg--GridTemplateColumns: 1fr auto;
+  --pf-v6-c-about-modal-box__brand--PaddingBlockStart: var(--pf-t--global--spacer--xl);
+  --pf-v6-c-about-modal-box__brand--sm--PaddingBlockEnd: var(--pf-t--global--spacer--md);
+  --pf-v6-c-about-modal-box__brand--sm--PaddingInlineStart: var(--pf-t--global--spacer--xl);
+  --pf-v6-c-about-modal-box__brand--sm--PaddingInlineEnd: var(--pf-t--global--spacer--xl);
+  --pf-v6-c-about-modal-box__close--PaddingBlockStart: var(--pf-t--global--spacer--lg);
+  --pf-v6-c-about-modal-box__close--lg--PaddingInlineEnd: var(--pf-t--global--spacer--lg);
+  --pf-v6-c-about-modal-box__close--sm--PaddingBlockEnd: var(--pf-t--global--spacer--md);
+  --pf-v6-c-about-modal-box__header--sm--PaddingInlineStart: var(--pf-t--global--spacer--xl);
+  --pf-v6-c-about-modal-box__header--sm--PaddingInlineEnd: var(--pf-t--global--spacer--xl);
+  --pf-v6-c-about-modal-box__content--sm--MarginBlockStart: var(--pf-t--global--spacer--md);
+  --pf-v6-c-about-modal-box__header--PaddingBlockEnd: 0;
+  --pf-v6-c-about-modal-box__content--sm--MarginInlineStart: var(--pf-t--global--spacer--xl);
+  --pf-v6-c-about-modal-box__content--sm--MarginInlineEnd: var(--pf-t--global--spacer--xl);
+  --pf-v6-c-about-modal-box__content--sm--MarginBlockEnd: var(--pf-t--global--spacer--xl);
+  border-radius: var(--pf-t--global--border--radius--large);
+  width: min(44rem, calc(100vw - 2 * var(--pf-t--global--spacer--lg)));
+  max-height: calc(100dvh - 2 * var(--pf-t--global--spacer--lg));
+  overflow: auto;
+}
+.about-backdrop .pf-v6-c-description-list {
+  --pf-v6-c-description-list--m-horizontal__term--width: 10rem;
+  --pf-v6-c-description-list--RowGap: var(--pf-t--global--spacer--sm);
+}
+.about-backdrop .pf-v6-c-description-list__description :is(a, .selectable) { overflow-wrap: anywhere; }
+.about-backdrop { z-index: 1000; }
+.about-mark { display: block; height: 3rem; width: auto; }
+
+/* Every dialog's backdrop blurs what is behind it, so the dialog reads as
+   the one thing to deal with; not when the system asks for less
+   transparency. */
+.pf-v6-c-backdrop { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
+@media (prefers-reduced-transparency: reduce) {
+  .pf-v6-c-backdrop { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

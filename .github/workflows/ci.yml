@@ -45,6 +45,8 @@ jobs:
       - run: npm run build
       - name: Maskrom path inside Electron against a pretend board
         run: xvfb-run -a node scripts/electron-maskrom-e2e.mjs
+      - name: Scrolling and text selection inside Electron at small window sizes
+        run: xvfb-run -a node scripts/electron-scroll-e2e.mjs
       - name: Screenshots
         run: |
           xvfb-run -a node scripts/shots.mjs shots

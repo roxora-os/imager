@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+- About Roxora Imager, from Settings: the version with the commit and date
+  it was built from, the PatternFly it uses, what it connects to (GitHub,
+  and Rockchip's rkbin once; no analytics or telemetry), where it keeps
+  settings and downloads, the licence and the source. Settings keeps the
+  version.
+- Settings shows how much the downloaded images and the Maskrom loaders
+  take, and has Clear cache: a dialog lists what is deleted and the folder,
+  and the freed size is shown. Both come back when needed. Not while a
+  write runs.
+- The window is never taller or wider than the screen's work area (on a
+  1366x768 laptop at 125% it ran past the bottom of the screen), and can
+  be made as small as 720x480. Static text and the page chrome no longer
+  take a selection from a stray drag, and Ctrl+A outside a text field
+  selects nothing; fields, logs, details, results and error messages can
+  still be selected and copied.
+- Windows on Arm: a native arm64 installer and zip next to the x64 ones.
+  The in-app update installs the arm64 build on an arm64 computer.
 - Destination: a third choice, Save as an image file, saves the
   uncompressed .img in a folder you pick in the system's save dialog, for
   Ventoy and similar boot-from-file devices or a virtual machine. A release

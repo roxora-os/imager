@@ -4,6 +4,7 @@
 // every path is relative.
 import { build } from 'esbuild';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { buildDefines } from './lib/build-info.mjs';
 
 const out = 'web-dist';
 const version = JSON.parse(readFileSync('package.json', 'utf8')).version;
@@ -29,7 +30,7 @@ await build({
   ...web, entryPoints: { app: 'src/web/main.tsx' }, outdir: out,
   loader: { '.woff2': 'file', '.woff': 'file', '.ttf': 'file', '.svg': 'file', '.png': 'file', '.jpg': 'file' },
   assetNames: 'assets/[name]-[hash]', jsx: 'automatic',
-  define: { 'process.env.NODE_ENV': '"production"', __APP_VERSION__: JSON.stringify(version), __APP_HAS_RELEASE__: JSON.stringify(hasRelease), __DOWNLOAD_PROXY__: JSON.stringify(downloadProxy) },
+  define: { 'process.env.NODE_ENV': '"production"', __APP_VERSION__: JSON.stringify(version), __APP_HAS_RELEASE__: JSON.stringify(hasRelease), __DOWNLOAD_PROXY__: JSON.stringify(downloadProxy), ...buildDefines() },
 });
 await build({ ...web, entryPoints: { 'maskrom-worker': 'src/maskrom/worker.ts' }, outdir: out });
 cpSync('src/web/index.html', `${out}/index.html`);

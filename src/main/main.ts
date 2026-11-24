@@ -1,7 +1,7 @@
 // The Electron main process: the window, the app:// protocol, WebUSB access
 // for the Maskrom worker, and everything that touches disks or the network.
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, session, shell, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, screen, session, shell, type WebContents } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
@@ -14,7 +14,8 @@ import type { CatalogImage } from '../shared/catalog';
 import { partitionedSize } from '../maskrom/spi-check';
 import { loadReleases, loadSample, writableImage, writableImages, type CatalogState } from './catalog-source';
 import { helperLaunch, runHelper, sudoPromptElevate } from './elevate';
-import { decompress, detectCompression, fetchImage, forgetFile, serveFile, serveFileAs } from './images';
+import { decompress, detectCompression, fetchImage, forgetFile, serveFile, serveFileAs, servedPaths } from './images';
+import { cacheInfo, clearCache, inCache } from './cache';
 import { ensureLoader } from './loader-cache';
 import { describeLocal, measureFile, sha256OfFile } from './local-image';
 import { handleProtocol, ORIGIN, registerScheme } from './protocol';
@@ -63,8 +64,14 @@ function askUsb(wc: WebContents, choices: UsbChoice[]): Promise<string> {
 }
 
 function createWindow() {
+  // Never larger than the screen's work area (a 1366x768 laptop at 125%
+  // has 1093x614 to give): a window taller than the screen hides its
+  // bottom, the wizard's buttons with it, and no scrolling inside it can
+  // reach that.
+  const area = screen.getPrimaryDisplay().workAreaSize;
   win = new BrowserWindow({
-    width: 1100, height: 760, minWidth: 720, minHeight: 560,
+    width: Math.min(1100, area.width), height: Math.min(760, area.height),
+    minWidth: Math.min(720, area.width), minHeight: Math.min(480, area.height),
     show: false,
     title: 'Roxora Imager',
     // The design icon (resources/icons/, from roxora-os/design) for the title
@@ -437,6 +444,14 @@ ipcMain.handle('settings:set', (_e, patch: { updateCheck?: boolean; betaUpdates?
     ...(typeof patch.resetAfterMaskrom === 'boolean' ? { resetAfterMaskrom: patch.resetAfterMaskrom } : {}),
   });
 });
+ipcMain.handle('cache:info', () => cacheInfo(app.getPath('userData')));
+ipcMain.handle('cache:clear', () => {
+  const data = app.getPath('userData');
+  // A job may be downloading into the cache; a file served to the Maskrom
+  // worker (while it writes) may be a cached image itself.
+  return clearCache(data, { busy: job !== null || servedPaths().some((p) => inCache(data, p)) });
+});
+
 ipcMain.handle('update:check', (_e, force: boolean) => checkForUpdate(force === true));
 // Only after the user pressed Update and confirmed (the page asks), and never during a write.
 ipcMain.handle('update:install', (e) => (job
@@ -454,7 +469,7 @@ ipcMain.handle('open-external', (_e, url: string) => {
   if (/^https:\/\/(github\.com\/roxora-os\/|roxora-os\.github\.io\/|zadig\.akeo\.ie\/)/.test(url)) return shell.openExternal(url);
 });
 ipcMain.on('app:info', (e) => {
-  e.returnValue = { platform: process.platform, version: app.getVersion(), devSample: DEV_SAMPLE };
+  e.returnValue = { platform: process.platform, version: app.getVersion(), devSample: DEV_SAMPLE, dataDir: app.getPath('userData') };
 });
 ipcMain.on('theme', (_e, t: 'light' | 'dark') => { nativeTheme.themeSource = t; });
 

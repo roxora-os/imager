@@ -79,8 +79,8 @@ stand-ins).
 
 ## Install
 
-Windows (x64), macOS (Apple silicon and Intel) and Linux (AppImage, .deb,
-.rpm; x86_64 and arm64) packages are attached to the
+Windows (x64 and arm64), macOS (Apple silicon and Intel) and Linux
+(AppImage, .deb, .rpm; x86_64 and arm64) packages are attached to the
 [releases](https://github.com/roxora-os/imager/releases). On macOS and Linux:
 
 ```sh
@@ -98,7 +98,7 @@ The app looks for a newer version once a day and offers to install it
 (Settings has "Check now" and the switch to turn the check off). Normal
 releases are offered to everyone. Beta versions are the pre-releases on
 GitHub, with a version such as 0.1.5-beta.1; they are offered only when
-"Also offer beta versions (pre-releases)" is turned on in Settings, and
+"Also offer beta versions" is turned on in Settings, and
 `install.sh` installs one only with `BETA=1`. Updates are installed inside
 the app after you confirm; how depends on how the app was installed (on
 macOS through Homebrew or by replacing the app from the new DMG):
@@ -123,7 +123,7 @@ and from where, is in the
 | Image list | The releases of roxora-os/build and the `roxora-catalog.json` in each, as described in its [release contract](https://github.com/roxora-os/build/blob/main/docs/release-contract.md). The website reads the same releases. |
 | SD/USB writing | Linux and Windows: [etcher-sdk](https://github.com/balena-io-modules/etcher-sdk), in a helper process started with administrator rights the way Etcher starts its writer. macOS: Apple's `authopen` opens the raw disk after the system's password dialog, as in Raspberry Pi Imager and Armbian Imager; a small helper (`src/helper/macos/rawdisk.c`) receives the open disk and writes whole blocks, and nothing runs as root (`src/main/mac-write.ts`). |
 | Maskrom writing | rkdeveloptool compiled to WebAssembly with libusb's WebUSB backend, as in [edk2-webflash](https://github.com/gahingwoo/edk2-webflash), running in a worker inside the app. |
-| Maskrom loader | Not shipped. The first Maskrom write downloads the pieces from Rockchip's [rkbin](https://github.com/rockchip-linux/rkbin) at a pinned commit (raw.githubusercontent.com), checks each against a pinned SHA-256, and builds the loader the way rkbin's boot_merger does (`src/maskrom/loader-merge.ts`, ported from RKDevelopTool-GUI). The result must match the SHA-256 of Rockchip's own build of that loader (`src/maskrom/loaders.ts`). The desktop app keeps it in its user data folder (`loaders/`), the web version in the browser's cache storage. Without a connection the write stops before anything is written and says so. |
+| Maskrom loader | Not shipped. The first Maskrom write downloads the pieces from Rockchip's [rkbin](https://github.com/rockchip-linux/rkbin) at a pinned commit (raw.githubusercontent.com), checks each against a pinned SHA-256, and builds the loader the way rkbin's boot_merger does (`src/maskrom/loader-merge.ts`, ported from RKDevelopTool-GUI). The result must match the SHA-256 of Rockchip's own build of that loader (`src/maskrom/loaders.ts`). The desktop app keeps it in its user data folder (`loaders/`, emptied by Clear cache in Settings), the web version in the browser's cache storage. Without a connection the write stops before anything is written and says so. |
 | Interface | Electron, React and [PatternFly](https://www.patternfly.org/). |
 | Icon | [roxora-os/design](https://github.com/roxora-os/design/tree/main/icons/imager) `icons/imager/`, copied unchanged into `resources/icons/` from design commit 8433edd. `scripts/icons.mjs` lays the files out for the packagers: the .icns for macOS, the .ico for Windows, and for Linux the PNGs in `hicolor/<n>x<n>/apps/`, the SVG in `hicolor/scalable/apps/` and the symbolic SVG in `hicolor/symbolic/apps/`, all named after the app ID `io.github.roxora_os.imager`. |
 | Download proxy | A Cloudflare Worker in [worker/](worker/), for the web version only. |

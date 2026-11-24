@@ -2,7 +2,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ImagerApi, JobProgress } from '../shared/ipc';
 
-const info = ipcRenderer.sendSync('app:info') as { platform: string; version: string; devSample: boolean };
+const info = ipcRenderer.sendSync('app:info') as { platform: string; version: string; devSample: boolean; dataDir: string };
 
 const api: ImagerApi = {
   ...info,
@@ -34,6 +34,8 @@ const api: ImagerApi = {
   answerUsbChoice: (id) => ipcRenderer.send('usb:answer', id),
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (s) => ipcRenderer.invoke('settings:set', s),
+  cacheInfo: () => ipcRenderer.invoke('cache:info'),
+  clearCache: () => ipcRenderer.invoke('cache:clear'),
   checkUpdate: (force) => ipcRenderer.invoke('update:check', force),
   installUpdate: () => ipcRenderer.invoke('update:install'),
   cancelUpdate: () => ipcRenderer.invoke('update:cancel'),
