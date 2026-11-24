@@ -116,10 +116,14 @@ an **Update** button. Closing the notice hides that version; Settings still
 offers it. No notice appears while a write is running. In Settings:
 
 - **Check for a new version once a day** turns the check off or on.
-- **Also offer beta versions** (pre-releases on GitHub) is off by default. Normal
-  releases are offered to everyone; betas only with this switch on. If the
-  version you run is itself a beta and no newer normal release exists, the
-  app says so and offers nothing.
+- **Release tier** chooses what is offered. **Stable** (the default): the
+  newest normal release. **Prerelease**: the newest version, betas (GitHub
+  pre-releases) included. **CI**: the rolling release tagged `ci`, which the
+  Release workflow replaces on every successful build of main; it is
+  untested, and offered when it was built from another commit than the
+  copy you run. If the version you run is itself a beta and no newer normal
+  release exists, Stable says so and offers nothing. Settings from before
+  the tiers keep their choice: beta versions on is Prerelease.
 - **Check now** asks at once and answers in words: the new version, "You
   have the newest version", or that GitHub could not be reached.
 

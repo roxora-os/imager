@@ -46,6 +46,8 @@ for (const [w, h] of [[900, 600], [1024, 700], [720, 480]]) {
   const page = await app.firstWindow();
   page.on('pageerror', (e) => failures.push(`${w}x${h}: ${e.message}`));
   await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setContentSize(w, h), [w, h]);
+  // English: the steps are found by their names.
+  await page.evaluate(() => { localStorage.setItem('lang', 'en'); });
   await page.reload();
   await page.waitForSelector('h2:has-text("Board")');
   await page.waitForTimeout(500);

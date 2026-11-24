@@ -49,7 +49,7 @@ for (const [w, h, tag] of [[1920, 1080, 'w'], [2560, 1440, 'x'], [390, 844, 'p']
     for (let i = 0; i < 10; i++) {
       try { await page.waitForFunction(() => self.crossOriginIsolated, null, { timeout: 3000 }); break; } catch { /* reloading */ }
     }
-    await page.evaluate((t) => { localStorage.setItem('theme', t); }, theme);
+    await page.evaluate((t) => { localStorage.setItem('theme', t); localStorage.setItem('lang', 'en'); }, theme);
     await page.reload();
     await page.waitForSelector('h2:has-text("Board")', { timeout: 30000 });
     facts[`${tag}-${theme}`] = await page.evaluate(() => ({ isolated: self.crossOriginIsolated, sw: !!navigator.serviceWorker?.controller }));
@@ -107,7 +107,7 @@ for (const [w, h, tag] of [[1920, 1080, 'w'], [390, 844, 'p']]) {
     for (let i = 0; i < 10; i++) {
       try { await page.waitForFunction(() => self.crossOriginIsolated, null, { timeout: 3000 }); break; } catch { /* reloading */ }
     }
-    await page.evaluate((t) => { localStorage.setItem('theme', t); }, theme);
+    await page.evaluate((t) => { localStorage.setItem('theme', t); localStorage.setItem('lang', 'en'); }, theme);
     await page.reload();
     await page.waitForSelector('h2:has-text("Board")', { timeout: 30000 });
     const shot = async (name) => {

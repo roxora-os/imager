@@ -4,7 +4,7 @@ import {
   ActionList, ActionListGroup, ActionListItem, Alert, AlertActionCloseButton, AlertActionLink, Button, CodeBlock, CodeBlockAction, CodeBlockCode, Content, DescriptionList,
   DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, EmptyState, EmptyStateActions, EmptyStateBody,
   EmptyStateFooter, ExpandableSection, Flex, FlexItem, Form, FormGroup, FormHelperText, FormSection, FormSelect, FormSelectOption,
-  HelperText, HelperTextItem, List, ListItem, Masthead,
+  Checkbox, HelperText, HelperTextItem, List, ListItem, Masthead, Menu, MenuContent, MenuItem, MenuList,
   MastheadBrand, MastheadContent, MastheadLogo, MastheadMain, Modal, ModalBody, ModalFooter, ModalHeader, Page,
   PageSection, Progress, ProgressMeasureLocation, Radio, SearchInput, Sidebar, SidebarContent, SidebarPanel, SimpleList,
   SimpleListItem,
@@ -13,6 +13,7 @@ import {
   useWizardContext,
 } from '@patternfly/react-core';
 import { CogIcon } from '@patternfly/react-icons/dist/esm/icons/cog-icon';
+import { GlobeIcon } from '@patternfly/react-icons/dist/esm/icons/globe-icon';
 import { TimesIcon } from '@patternfly/react-icons/dist/esm/icons/times-icon';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import {
@@ -20,16 +21,19 @@ import {
 } from '../shared/catalog';
 import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../shared/boardsearch';
 import { formatBytes, uncompressedName } from '../shared/format';
-import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
+import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile, SaveSubject, SaveTarget, UpdateImageFile } from '../shared/ipc';
 import type { CacheInfo } from '../main/cache';
 import { INTERNAL_WORDS, type HiddenDrive, type Target } from '../shared/targets';
-import { APT_COMMAND, type UpdateCheck, type UpdateOffer, type UpdateResult } from '../shared/update';
+import { APT_COMMAND, brewCommand, type UpdateCheck, type UpdateOffer, type UpdateResult } from '../shared/update';
+import { CHANNELS, type Channel } from '../shared/channel';
 import { maskromBoard, STORAGES, type StorageId } from '../maskrom/boards';
 import { RKBIN_HOST } from '../maskrom/loaders';
 import { SPI_FLASH_FALLBACK, spiFileProblem } from '../maskrom/spi-check';
 import type { Stage } from '../maskrom/sequence';
 import { startMaskrom, type MaskromJob } from './maskrom-client';
 import { readTheme, applyTheme, type Theme } from './theme';
+import { msg, t, useI18n } from './i18n';
+import { LANG_NAMES, LANGS, type Lang } from '../shared/i18n';
 
 declare global {
   interface Window { imager: ImagerApi }
@@ -48,10 +52,10 @@ const DESKTOP_URL = typeof __APP_HAS_RELEASE__ !== 'undefined' && !__APP_HAS_REL
   ? 'https://github.com/roxora-os/imager#install' : 'https://github.com/roxora-os/imager/releases';
 const RPI_IMAGER_URL = 'https://www.raspberrypi.com/software/';
 // Rockchip's loader is not shipped with the app (maskrom/loaders.ts).
-const LOADER_NOTE = `The first Maskrom write downloads Rockchip's loader from ${RKBIN_HOST} (rockchip-linux/rkbin) and checks it.`;
+const loaderNote = () => t("The first Maskrom write downloads Rockchip's loader from {host} (rockchip-linux/rkbin) and checks it.", { host: RKBIN_HOST });
 
 type Method = 'sd' | 'maskrom' | 'file';
-type MaskromSource = 'release' | 'spi' | 'file';
+type MaskromSource = 'release' | 'spi' | 'file' | 'update';
 /** A release file being downloaded or checked: what, and how far. */
 interface Checking { label: string; done: number; total: number }
 
@@ -77,15 +81,25 @@ function isUefiImage(img: CatalogImage | undefined): boolean {
  * the UEFI image on arm64 UEFI firmware, so in a virtual machine an arm64
  * one, and with Ventoy an arm64 UEFI computer. Never an x86 PC.
  */
-const UEFI_VM = 'an arm64 (aarch64) UEFI machine, such as QEMU virt with edk2 (AAVMF) or UTM on Apple silicon';
+const uefiVm = () => t('an arm64 (aarch64) UEFI machine, such as QEMU virt with edk2 (AAVMF) or UTM on Apple silicon');
+/** One line on what an update.img holds. */
+function updateWords(f: UpdateImageFile): string {
+  const u = f.update;
+  const who = [u.manufacturer, u.model].filter(Boolean).join(' ');
+  return t('{chip}{who}, version {version} of {date}: {parts}', { chip: u.chip, who: who ? `, ${who}` : '', version: u.version, date: u.released, parts: u.partitions.map((x) => x.name).join(', ') })
+    + (u.skipped.length ? t(' (not written: {parts})', { parts: u.skipped.join(', ') }) : '')
+    + t('. ') + (f.md5Checked ? t('Its MD5 matches.') : t('It carries no MD5 to check.'));
+}
+
 function bootNote(img: CatalogImage | undefined, custom: boolean): string {
   if (custom) {
-    return `Where it boots depends on the image: a Roxora board image only on its board, the generic RK3576 UEFI image in ${UEFI_VM}. Not on an x86 PC.`;
+    return t('Where it boots depends on the image: a Roxora board image only on its board, the generic RK3576 UEFI image in {vm}. Not on an x86 PC.', { vm: uefiVm() });
   }
   if (isUefiImage(img)) {
-    return `This UEFI image boots in ${UEFI_VM}, and from Ventoy only on an arm64 UEFI computer. Not on an x86 PC.`;
+    return t('This UEFI image boots in {vm}, and from Ventoy only on an arm64 UEFI computer. Not on an x86 PC.', { vm: uefiVm() });
   }
-  return `${img ? `This image boots only on the ${img.boardName}` : 'A board image boots only on its board'}. For a virtual machine or Ventoy use the generic RK3576 UEFI image, which needs ${UEFI_VM}. Neither boots on an x86 PC.`;
+  return (img ? t('This image boots only on the {board}.', { board: img.boardName }) : t('A board image boots only on its board.'))
+    + t(' For a virtual machine or Ventoy use the generic RK3576 UEFI image, which needs {vm}. Neither boots on an x86 PC.', { vm: uefiVm() });
 }
 
 /** The last part of a path, for Windows paths as well. */
@@ -99,7 +113,7 @@ function defaultSource(m: ReturnType<typeof maskromBoard>, img: CatalogImage | u
 }
 
 function releaseWords(img: CatalogImage): string {
-  return img.releaseInfo.prerelease ? `Beta ${img.releaseInfo.version}` : `Release ${img.releaseInfo.version}`;
+  return img.releaseInfo.prerelease ? t('Beta {version}', { version: img.releaseInfo.version }) : t('Release {version}', { version: img.releaseInfo.version });
 }
 
 /*
@@ -108,6 +122,8 @@ function releaseWords(img: CatalogImage): string {
  * nav running the full height and its footer pinned to the bottom.
  */
 function Shell({ children, onSettings }: { children: React.ReactNode; onSettings: () => void }) {
+  const { lang } = useI18n();
+  const [langOpen, setLangOpen] = useState(false);
   const masthead = (
     <Masthead display={{ default: 'inline' }}>
       <MastheadMain>
@@ -123,7 +139,13 @@ function Shell({ children, onSettings }: { children: React.ReactNode; onSettings
           <ToolbarContent>
             <ToolbarGroup align={{ default: 'alignEnd' }}>
               <ToolbarItem>
-                <Button variant="plain" icon={<CogIcon />} onClick={onSettings}>Settings</Button>
+                <Button variant="plain" icon={<GlobeIcon />} aria-label={t('Display language')} title={t('Display language')}
+                  onClick={() => setLangOpen(true)}>
+                  <span lang={lang}>{LANG_NAMES[lang]}</span>
+                </Button>
+              </ToolbarItem>
+              <ToolbarItem>
+                <Button variant="plain" icon={<CogIcon />} onClick={onSettings}>{t('Settings')}</Button>
               </ToolbarItem>
             </ToolbarGroup>
           </ToolbarContent>
@@ -131,7 +153,41 @@ function Shell({ children, onSettings }: { children: React.ReactNode; onSettings
       </MastheadContent>
     </Masthead>
   );
-  return <Page masthead={masthead} isContentFilled>{children}</Page>;
+  return (
+    <Page masthead={masthead} isContentFilled>
+      {children}
+      {langOpen && <LangModal onClose={() => setLangOpen(false)} />}
+    </Page>
+  );
+}
+
+/*
+ * The language dialog, as Cockpit's "Display language" (shell-modals.jsx)
+ * and Maskrom Studio's: a small modal with a plain menu of the languages,
+ * each in its own language, the current one selected, and Select / Cancel.
+ */
+function LangModal({ onClose }: { onClose: () => void }) {
+  const { lang, setLang } = useI18n();
+  const [picked, setPicked] = useState<Lang>(lang);
+  const apply = () => { if (picked !== lang) setLang(picked); onClose(); };
+  return (
+    <Modal isOpen variant="small" onClose={onClose} aria-labelledby="lang-dialog-title" id="lang-dialog">
+      <ModalHeader title={t('Display language')} labelId="lang-dialog-title" />
+      <ModalBody>
+        <Menu isPlain isScrollable activeItemId={picked} selected={picked} onSelect={(_e, id) => setPicked(id as Lang)}>
+          <MenuContent>
+            <MenuList>
+              {LANGS.map((l) => <MenuItem key={l} itemId={l} isSelected={picked === l} lang={l}>{LANG_NAMES[l]}</MenuItem>)}
+            </MenuList>
+          </MenuContent>
+        </Menu>
+      </ModalBody>
+      <ModalFooter>
+        <Button variant="primary" onClick={apply}>{t('Select')}</Button>
+        <Button variant="link" onClick={onClose}>{t('Cancel')}</Button>
+      </ModalFooter>
+    </Modal>
+  );
 }
 
 /** One wizard step's content: title, optional lead, notices, then the step itself. */
@@ -154,7 +210,7 @@ function StepPage({ title, lead, notices, children }: {
 interface LocalPick {
   local: LocalImage | null; busy: boolean; error: string | null; pick: () => void; clear: () => void;
 }
-const LOCAL_BUTTON = 'Use an image file on this computer';
+const localButton = () => t('Use an image file on this computer');
 
 /** The file chosen for the SD/USB path, and plainly whether a release vouches for it. */
 function LocalImageRow({ lp }: { lp: LocalPick }) {
@@ -164,24 +220,23 @@ function LocalImageRow({ lp }: { lp: LocalPick }) {
     <Stack hasGutter className="local-image">
       <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
         <FlexItem flex={{ default: 'flexNone' }}>
-          <Button variant="secondary" onClick={lp.pick} isLoading={lp.busy} isDisabled={lp.busy}>{LOCAL_BUTTON}</Button>
+          <Button variant="secondary" onClick={lp.pick} isLoading={lp.busy} isDisabled={lp.busy}>{localButton()}</Button>
         </FlexItem>
         <FlexItem>
           {local ? `${local.name}, ${formatBytes(local.size)}`
-            : 'A downloaded .img, .img.xz, .img.gz or .img.bz2, for an SD card or USB drive. You can also drop the file on this window.'}
+            : t('A downloaded .img, .img.xz, .img.gz or .img.bz2, for an SD card or USB drive. You can also drop the file on this window.')}
         </FlexItem>
-        {local && <FlexItem><Button variant="link" isInline onClick={lp.clear}>Remove</Button></FlexItem>}
+        {local && <FlexItem><Button variant="link" isInline onClick={lp.clear}>{t('Remove')}</Button></FlexItem>}
       </Flex>
       {lp.error && <Alert variant="danger" isInline isPlain title={lp.error} />}
       {local && !local.imageId && (
-        <Alert isInline variant="warning" title="Not a Roxora release image">
-          {local.name} is not a file of the Roxora releases listed here, so it was not checked against one. It is
-          written as it is; afterwards the drive is read back and compared with the file.
+        <Alert isInline variant="warning" title={t('Not a Roxora release image')}>
+          {t('{name} is not a file of the Roxora releases listed here, so it was not checked against one. It is written as it is; afterwards the drive is read back and compared with the file.', { name: local.name })}
         </Alert>
       )}
       {local?.imageId && (
-        <Alert isInline variant="success" title="This file is the release image selected above">
-          Its SHA-256 matches the release. It is written from this computer, without a download.
+        <Alert isInline variant="success" title={t('This file is the release image selected above')}>
+          {t('Its SHA-256 matches the release. It is written from this computer, without a download.')}
         </Alert>
       )}
     </Stack>
@@ -207,18 +262,18 @@ function BoardStep({ catalog, boards, board, setBoard, reload, find, notices, lp
 }) {
   // Without the release list a downloaded image can still be written.
   const localAction = api.pickLocalImage && (
-    <Button variant="secondary" onClick={lp.pick} isLoading={lp.busy} isDisabled={lp.busy}>{LOCAL_BUTTON}</Button>
+    <Button variant="secondary" onClick={lp.pick} isLoading={lp.busy} isDisabled={lp.busy}>{localButton()}</Button>
   );
   const localError = lp.error && <EmptyStateBody><Alert variant="danger" isInline isPlain title={lp.error} /></EmptyStateBody>;
-  if (!catalog) return <EmptyState titleText="Loading releases" headingLevel="h2" icon={Spinner} />;
+  if (!catalog) return <EmptyState titleText={t('Loading releases')} headingLevel="h2" icon={Spinner} />;
   if (catalog.state === 'error') {
     return (
-      <EmptyState titleText="Could not load the releases" headingLevel="h2">
-        <EmptyStateBody>{catalog.message}</EmptyStateBody>
+      <EmptyState titleText={t('Could not load the releases')} headingLevel="h2">
+        <EmptyStateBody>{msg(catalog.message)}</EmptyStateBody>
         {localError}
         <EmptyStateFooter>
           <EmptyStateActions>
-            <Button variant="secondary" onClick={reload}>Try again</Button>
+            <Button variant="secondary" onClick={reload}>{t('Try again')}</Button>
             {localAction}
           </EmptyStateActions>
         </EmptyStateFooter>
@@ -227,29 +282,28 @@ function BoardStep({ catalog, boards, board, setBoard, reload, find, notices, lp
   }
   if (catalog.state === 'none') {
     return (
-      <EmptyState titleText="No Roxora releases yet" headingLevel="h2">
+      <EmptyState titleText={t('No Roxora releases yet')} headingLevel="h2">
         <EmptyStateBody>
-          Roxora images are published as releases of roxora-os/build. There are none yet, so there is nothing to
-          write. This list fills itself once the first release is out.
+          {t('Roxora images are published as releases of roxora-os/build. There are none yet, so there is nothing to write. This list fills itself once the first release is out.')}
         </EmptyStateBody>
         {localError}
         <EmptyStateFooter>
           <EmptyStateActions>
-            <Button variant="secondary" onClick={reload}>Check again</Button>
+            <Button variant="secondary" onClick={reload}>{t('Check again')}</Button>
             {localAction}
-            <Button variant="link" component="a" href={RELEASES_URL} target="_blank">Releases on GitHub</Button>
+            <Button variant="link" component="a" href={RELEASES_URL} target="_blank">{t('Releases on GitHub')}</Button>
           </EmptyStateActions>
         </EmptyStateFooter>
       </EmptyState>
     );
   }
   return (
-    <StepPage title="Board" notices={notices} lead={api.pickLocalImage ? (
+    <StepPage title={t('Board')} notices={notices} lead={api.pickLocalImage ? (
       <>
-        Choose the board you want to install Roxora on. Already downloaded an image?{' '}
-        <Button variant="link" isInline onClick={lp.pick} isDisabled={lp.busy}>{LOCAL_BUTTON}</Button>
+        {t('Choose the board you want to install Roxora on. Already downloaded an image?')}{' '}
+        <Button variant="link" isInline onClick={lp.pick} isDisabled={lp.busy}>{localButton()}</Button>
       </>
-    ) : 'Choose the board you want to install Roxora on.'}>
+    ) : t('Choose the board you want to install Roxora on.')}>
       {lp.error && <Alert variant="danger" isInline isPlain title={lp.error} />}
       <BoardPicker boards={boards} board={board} setBoard={setBoard} find={find} />
     </StepPage>
@@ -301,46 +355,46 @@ function BoardPicker({ boards, board, setBoard, find }: {
   return (
     <Stack hasGutter>
       <div ref={box} onKeyDown={onKeyDown} className="board-search">
-        <SearchInput placeholder="Search boards, vendors or SoCs" value={query} aria-label="Search boards, vendors or SoCs"
+        <SearchInput placeholder={t('Search boards, vendors or SoCs')} value={query} aria-label={t('Search boards, vendors or SoCs')}
           onChange={(_e, v) => setQuery(v)} onClear={() => setQuery('')} />
       </div>
       <Sidebar hasGutter>
         <SidebarPanel width={{ default: 'width_25' }}>
           <div className="vendor-select">
-            <FormSelect value={active} onChange={(_e, v) => pick(v)} aria-label="Vendor">
-              <FormSelectOption value={ALL} label={vendorLabel('All vendors', total)} />
+            <FormSelect value={active} onChange={(_e, v) => pick(v)} aria-label={t('Vendor')}>
+              <FormSelectOption value={ALL} label={vendorLabel(t('All vendors'), total)} />
               {counts.map((c) => (
                 <FormSelectOption key={c.vendor} value={c.vendor} label={vendorLabel(c.vendor, c.count)} isDisabled={searching && c.count === 0} />
               ))}
             </FormSelect>
           </div>
-          <nav className="vendor-list" aria-label="Vendors">
+          <nav className="vendor-list" aria-label={t('Vendors')}>
             <SimpleList onSelect={(_ref, props) => pick(String(props.itemId ?? ALL))} isControlled={false}>
-              {vendorItem(ALL, 'All vendors', total)}
+              {vendorItem(ALL, t('All vendors'), total)}
               {counts.map((c) => vendorItem(c.vendor, c.vendor, c.count, searching && c.count === 0))}
             </SimpleList>
           </nav>
         </SidebarPanel>
         <SidebarContent>
           {shown.length === 0 ? (
-            <EmptyState titleText={<>No board matches &ldquo;{query.trim()}&rdquo;</>} headingLevel="h3" variant="sm">
+            <EmptyState titleText={t('No board matches “{query}”', { query: query.trim() })} headingLevel="h3" variant="sm">
               <EmptyStateFooter>
                 <EmptyStateActions>
-                  <Button variant="link" component="a" href={BOARD_REQUEST_URL} target="_blank">Ask for a board to be supported</Button>
-                  <Button variant="link" onClick={() => setQuery('')}>Clear the search</Button>
+                  <Button variant="link" component="a" href={BOARD_REQUEST_URL} target="_blank">{t('Ask for a board to be supported')}</Button>
+                  <Button variant="link" onClick={() => setQuery('')}>{t('Clear the search')}</Button>
                 </EmptyStateActions>
               </EmptyStateFooter>
             </EmptyState>
           ) : (
-            <Table aria-label="Boards" variant="compact">
-              <Thead><Tr><Th screenReaderText="Select" /><Th>Board</Th><Th>SoC</Th><Th>Newest image</Th></Tr></Thead>
+            <Table aria-label={t('Boards')} variant="compact">
+              <Thead><Tr><Th screenReaderText={t('Select')} /><Th>{t('Board')}</Th><Th>SoC</Th><Th>{t('Newest image')}</Th></Tr></Thead>
               <Tbody>
                 {shown.map((b, i) => (
                   <Tr key={b.board} isClickable onRowClick={() => setBoard(b.board)} isRowSelected={board === b.board}>
                     <Td select={{ rowIndex: i, variant: 'radio', isSelected: board === b.board, onSelect: () => setBoard(b.board) }} />
-                    <Td dataLabel="Board" className="nowrap-md">{b.boardName}</Td>
+                    <Td dataLabel={t('Board')} className="nowrap-md">{b.boardName}</Td>
                     <Td dataLabel="SoC" className="nowrap-md">{b.soc.toUpperCase()}</Td>
-                    <Td dataLabel="Newest image">{releaseWords(b.images[0])}</Td>
+                    <Td dataLabel={t('Newest image')}>{releaseWords(b.images[0])}</Td>
                   </Tr>
                 ))}
               </Tbody>
@@ -361,7 +415,7 @@ const IMAGE_COLUMNS: [ImageSortKey, string, 15 | 20 | 25 | 30][] = [
 type ImageSort = { key: ImageSortKey; dir: 'asc' | 'desc' } | null;
 
 function releaseLabel(r: CatalogRelease): string {
-  return `${r.prerelease ? 'Beta' : 'Release'} ${r.version} (${r.date})`;
+  return t(r.prerelease ? 'Beta {version} ({date})' : 'Release {version} ({date})', { version: r.version, date: r.date });
 }
 
 function ImageTable({ label, images, selected, setImage, sort, setSort }: {
@@ -371,23 +425,23 @@ function ImageTable({ label, images, selected, setImage, sort, setSort }: {
   const rows = sort ? [...images].sort((x, y) => (sort.dir === 'asc' ? 1 : -1) * compareImages(x, y, sort.key)) : images;
   return (
     <Table aria-label={label} variant="compact">
-      <Thead><Tr><Th screenReaderText="Select" />
+      <Thead><Tr><Th screenReaderText={t('Select')} />
         {IMAGE_COLUMNS.map(([key, name, width], col) => (
           <Th key={key} width={width} sort={{
             columnIndex: col + 1,
             sortBy: sort ? { index: IMAGE_COLUMNS.findIndex(([k]) => k === sort.key) + 1, direction: sort.dir } : {},
             onSort: (_e, _i, dir) => setSort({ key, dir }),
-          }}>{name}</Th>
+          }}>{t(name)}</Th>
         ))}
       </Tr></Thead>
       <Tbody>
         {rows.map((img, i) => (
           <Tr key={img.id} isClickable onRowClick={() => setImage(img.id)} isRowSelected={selected === img.id}>
             <Td select={{ rowIndex: i, variant: 'radio', isSelected: selected === img.id, onSelect: () => setImage(img.id) }} />
-            <Td dataLabel="Ubuntu">{img.ubuntuVersion} ({img.release})</Td>
-            <Td dataLabel="Desktop">{flavorWords(img.flavor)}</Td>
-            <Td dataLabel="Kernel">{img.kernel ? `${img.kernel} ` : ''}{img.branch}</Td>
-            <Td dataLabel="Size">{formatBytes(img.size)}</Td>
+            <Td dataLabel={t('Ubuntu')}>{img.ubuntuVersion} ({img.release})</Td>
+            <Td dataLabel={t('Desktop')}>{t(flavorWords(img.flavor))}</Td>
+            <Td dataLabel={t('Kernel')}>{img.kernel ? `${img.kernel} ` : ''}{img.branch}</Td>
+            <Td dataLabel={t('Size')}>{formatBytes(img.size)}</Td>
           </Tr>
         ))}
       </Tbody>
@@ -417,34 +471,34 @@ function ImageStep({ board, imageId, setImage, lp }: {
   const older = others.find((r) => r.release.tag === (olderTag ?? (selOlder ? sel!.releaseInfo.tag : null))) ?? others[0];
   const tableProps = { selected, setImage, sort, setSort };
   return (
-    <StepPage title="Image" lead={!board ? 'No board is chosen, so no release images are listed.'
-      : current ? <>Images for {board.boardName} from Roxora {current.release.version}
-        {current.release.prerelease ? ' (a beta)' : ''}, released {current.release.date}.{' '}
-        <Button variant="link" isInline component="a" href={current.release.url} target="_blank">Release notes</Button></>
-      : `Images for ${board.boardName}.`}>
-      {current && <ImageTable label={`Images of Roxora ${current.release.version}`} images={current.images} {...tableProps} />}
+    <StepPage title={t('Image')} lead={!board ? t('No board is chosen, so no release images are listed.')
+      : current ? <>{t(current.release.prerelease ? 'Images for {board} from Roxora {version} (a beta), released {date}.' : 'Images for {board} from Roxora {version}, released {date}.',
+        { board: board.boardName, version: current.release.version, date: current.release.date })}{' '}
+        <Button variant="link" isInline component="a" href={current.release.url} target="_blank">{t('Release notes')}</Button></>
+      : t('Images for {board}.', { board: board.boardName })}>
+      {current && <ImageTable label={t('Images of Roxora {version}', { version: current.release.version })} images={current.images} {...tableProps} />}
       {older && (
         <ExpandableSection className="older-releases" isExpanded={olderOpen || selOlder}
           onToggle={(_e, open) => setOlderOpen(open)}
-          toggleText={`Older releases and betas (${others.length})`}>
+          toggleText={t('Older releases and betas ({n})', { n: others.length })}>
           <Stack hasGutter>
-            <FormGroup label="Release" fieldId="older-release">
+            <FormGroup label={t('Release')} fieldId="older-release">
               <FormSelect id="older-release" value={older.release.tag} onChange={(_e, v) => setOlderTag(v)}>
                 {others.map((r) => <FormSelectOption key={r.release.tag} value={r.release.tag} label={releaseLabel(r.release)} />)}
               </FormSelect>
             </FormGroup>
             <Alert isInline isPlain variant="info" title={older.release.prerelease
-              ? 'A beta: optional, for trying what comes next.'
-              : `An older release: ${current ? `Roxora ${current.release.version}` : 'the newest release'} is the safer choice.`}>
-              <Button variant="link" isInline component="a" href={older.release.url} target="_blank">Release notes</Button>
+              ? t('A beta: optional, for trying what comes next.')
+              : current ? t('An older release: Roxora {version} is the safer choice.', { version: current.release.version }) : t('An older release: the newest release is the safer choice.')}>
+              <Button variant="link" isInline component="a" href={older.release.url} target="_blank">{t('Release notes')}</Button>
             </Alert>
-            <ImageTable label={`Images of Roxora ${older.release.version}`} images={older.images} {...tableProps} />
+            <ImageTable label={t('Images of Roxora {version}', { version: older.release.version })} images={older.images} {...tableProps} />
           </Stack>
         </ExpandableSection>
       )}
       {sel && selOlder && (
         <Content component="p" className="step-lead">
-          Selected: {releaseWords(sel)}, an image {sel.releaseInfo.prerelease ? 'of a beta' : 'of an older release'}.
+          {t(sel.releaseInfo.prerelease ? 'Selected: {release}, an image of a beta.' : 'Selected: {release}, an image of an older release.', { release: releaseWords(sel) })}
         </Content>
       )}
       <LocalImageRow lp={lp} />
@@ -456,18 +510,16 @@ function DriversNote() {
   if (WEB) {
     return (
       <Content component="p">
-        On Windows the board needs the WinUSB driver: install it once
-        with <Button variant="link" isInline component="a" href="https://zadig.akeo.ie/" target="_blank">Zadig</Button> (the
-        device with ID 2207, WinUSB, Install Driver). On Linux your user needs access to the device, for example
-        through a udev rule for vendor 2207 with TAG+="uaccess". macOS needs nothing.
+        {t('On Windows the board needs the WinUSB driver: install it once with')}{' '}
+        <Button variant="link" isInline component="a" href="https://zadig.akeo.ie/" target="_blank">Zadig</Button>{' '}
+        {t('(the device with ID 2207, WinUSB, Install Driver). On Linux your user needs access to the device, for example through a udev rule for vendor 2207 with TAG+="uaccess". macOS needs nothing.')}
       </Content>
     );
   }
   if (api.platform === 'win32') {
     return (
       <Content component="p">
-        Windows needs the WinUSB driver for the board in Maskrom mode. Install it once with Zadig: choose the
-        device with ID 2207 in Zadig's list, select WinUSB and click Install Driver.{' '}
+        {t("Windows needs the WinUSB driver for the board in Maskrom mode. Install it once with Zadig: choose the device with ID 2207 in Zadig's list, select WinUSB and click Install Driver.")}{' '}
         <Button variant="link" isInline component="a" href="https://zadig.akeo.ie/" target="_blank">zadig.akeo.ie</Button>
       </Content>
     );
@@ -476,14 +528,13 @@ function DriversNote() {
     return (
       <>
         <Content component="p">
-          The .deb and .rpm packages install a udev rule that lets you use the board without root. With the
-          AppImage, add the rule once:
+          {t('The .deb and .rpm packages install a udev rule that lets you use the board without root. With the AppImage, add the rule once:')}
         </Content>
         <CopyBlock text={'echo \'SUBSYSTEM=="usb", ATTR{idVendor}=="2207", TAG+="uaccess"\' | sudo tee /etc/udev/rules.d/70-roxora-imager.rules\nsudo udevadm control --reload-rules && sudo udevadm trigger'} />
       </>
     );
   }
-  return <Content component="p">macOS needs no driver.</Content>;
+  return <Content component="p">{t('macOS needs no driver.')}</Content>;
 }
 
 function DestinationStep(p: {
@@ -496,6 +547,10 @@ function DestinationStep(p: {
   storage: StorageId | null; setStorage: (s: StorageId) => void;
   source: MaskromSource; setSource: (s: MaskromSource) => void;
   file: PreparedFile | null; pickFile: () => void; picking: boolean; fileError: string | null;
+  /** A Rockchip update.img for the eMMC (desktop only). */
+  updateFile: UpdateImageFile | null; pickUpdate: () => void;
+  /** After a whole image, also zero the old backup GPT at the end of the storage. */
+  clearGpt: boolean; setClearGpt: (v: boolean) => void;
   releaseFile: PreparedFile | null; pickRelease: () => void; checking: Checking | null;
   downloadRelease: () => void; proxyError: string | null;
   /** An image file from this computer that is no release image: SD card or USB drive only. */
@@ -529,39 +584,37 @@ function DestinationStep(p: {
       return (
         <Progress size="sm" title={p.checking.label} measureLocation={ProgressMeasureLocation.top}
           value={p.checking.total ? Math.floor(p.checking.done * 100 / p.checking.total) : 0}
-          label={p.checking.total ? `${formatBytes(p.checking.done)} of ${formatBytes(p.checking.total)}` : undefined} />
+          label={p.checking.total ? t('{done} of {total}', { done: formatBytes(p.checking.done), total: formatBytes(p.checking.total) }) : undefined} />
       );
     }
     if (viaProxy) {
       return fileRow(
-        <Button variant="secondary" onClick={p.downloadRelease}>Download from the release</Button>,
-        p.releaseFile ? `${p.releaseFile.name}: downloaded, matches the release`
-          : relFile ? `${relFile.file}, ${formatBytes(relFile.size)}, through ${api.downloadProxy}` : '',
+        <Button variant="secondary" onClick={p.downloadRelease}>{t('Download from the release')}</Button>,
+        p.releaseFile ? t('{name}: downloaded, matches the release', { name: p.releaseFile.name })
+          : relFile ? t('{name}, {size}, through {proxy}', { name: relFile.file, size: formatBytes(relFile.size), proxy: api.downloadProxy ?? '' }) : '',
       );
     }
     return fileRow(
-      <Button variant="secondary" onClick={p.pickRelease}>Choose the downloaded file</Button>,
-      p.releaseFile ? `${p.releaseFile.name}: matches the release` : 'No file chosen',
+      <Button variant="secondary" onClick={p.pickRelease}>{t('Choose the downloaded file')}</Button>,
+      p.releaseFile ? t('{name}: matches the release', { name: p.releaseFile.name }) : t('No file chosen'),
     );
   };
   // When the proxy download fails the reason is up under the title: bring it into view.
   const byHandRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (p.proxyError) byHandRef.current?.scrollIntoView({ block: 'nearest' }); }, [p.proxyError]);
   const byHand = !!relFile && !viaProxy && !p.releaseFile && (
-    <Alert ref={byHandRef} isInline variant={p.proxyError ? 'warning' : 'info'} title="Download the release file by hand">
+    <Alert ref={byHandRef} isInline variant={p.proxyError ? 'warning' : 'info'} title={t('Download the release file by hand')}>
       {relParts.length > 0 ? (
         <>
-          This image is larger than GitHub takes as one file, so the release has it in {relParts.length} parts.
-          Download them, join them in order (<code>cat {relFile.file}.part* &gt; {relFile.file}</code>), then
-          choose the joined file under What to write:{' '}
+          {t('This image is larger than GitHub takes as one file, so the release has it in {n} parts. Download them, join them in order', { n: relParts.length })}{' '}
+          (<code>cat {relFile.file}.part* &gt; {relFile.file}</code>){t(', then choose the joined file under What to write:')}{' '}
           {relParts.map((part, i) => (
             <span key={part.file}>{i > 0 ? ', ' : ''}<Button variant="link" isInline component="a" href={part.url}>{part.file}</Button></span>
           ))}
         </>
       ) : (
         <>
-          {p.proxyError ?? 'GitHub does not let a web page download release files itself.'} Download it, then
-          choose it under What to write:{' '}
+          {p.proxyError ? msg(p.proxyError) : t('GitHub does not let a web page download release files itself.')}{' '}{t('Download it, then choose it under What to write:')}{' '}
           <Button variant="link" isInline component="a" href={relFile.url}>{relFile.file}</Button>
         </>
       )}
@@ -569,35 +622,36 @@ function DestinationStep(p: {
   );
   const lead = WEB ? (
     <>
-      A browser cannot write an SD card or USB drive in this computer; for that use
-      the <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">Roxora Imager desktop app</Button> or <Button variant="link" isInline component="a" href={RPI_IMAGER_URL} target="_blank">Raspberry Pi Imager</Button>.
-      {mb ? ` Here the ${p.boardName} is written over USB in Maskrom mode. ${LOADER_NOTE}` : ` Maskrom writing is not set up for ${p.boardName}.`}
+      {t('A browser cannot write an SD card or USB drive in this computer; for that use the')}{' '}
+      <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">{t('Roxora Imager desktop app')}</Button>{' '}{t('or')}{' '}
+      <Button variant="link" isInline component="a" href={RPI_IMAGER_URL} target="_blank">Raspberry Pi Imager</Button>{t('.')}
+      {' '}{mb ? `${t('Here the {board} is written over USB in Maskrom mode.', { board: p.boardName })} ${loaderNote()}` : t('Maskrom writing is not set up for {board}.', { board: p.boardName })}
     </>
   ) : undefined;
   return (
-    <StepPage title="Destination" lead={lead} notices={byHand || undefined}>
+    <StepPage title={t('Destination')} lead={lead} notices={byHand || undefined}>
       <Form className="destination" onSubmit={(e) => e.preventDefault()}>
         {!WEB && (
-          <FormGroup role="radiogroup" fieldId="method" label="Write to" isStack>
+          <FormGroup role="radiogroup" fieldId="method" label={t('Write to')} isStack>
             <Radio id="method-sd" name="method" isChecked={p.method === 'sd'} onChange={() => p.setMethod('sd')}
-              label="SD card or USB drive" description="Write the image to a card or stick in this computer, then boot the board from it." />
+              label={t('SD card or USB drive')} description={t('Write the image to a card or stick in this computer, then boot the board from it.')} />
             <Radio id="method-maskrom" name="method" isChecked={p.method === 'maskrom'} onChange={() => p.setMethod('maskrom')}
               isDisabled={!mb || p.custom}
-              label="Board storage over USB (Maskrom)"
-              description={p.custom ? 'Not for the image file chosen in the Image step. Choose a board and one of its release images to write over USB; a file can be chosen there as well.'
-                : mb ? `Through the board's USB-C port: ${mb.storages.map((s) => STORAGES[s].label).join(', or ')}. ${LOADER_NOTE}`
-                : `Maskrom writing is not set up for ${p.boardName}.`} />
+              label={t('Board storage over USB (Maskrom)')}
+              description={p.custom ? t('Not for the image file chosen in the Image step. Choose a board and one of its release images to write over USB; a file can be chosen there as well.')
+                : mb ? `${t("Through the board's USB-C port: {storages}.", { storages: mb.storages.map((s) => t(STORAGES[s].label)).join(t(', or ')) })} ${loaderNote()}`
+                : t('Maskrom writing is not set up for {board}.', { board: p.boardName })} />
             {api.pickSaveFile && (
               <Radio id="method-file" name="method" isChecked={p.method === 'file'} onChange={() => p.setMethod('file')}
-                label="Save as an image file"
-                description={`The uncompressed .img, for Ventoy and similar boot-from-file devices, or a virtual machine. ${bootNote(p.image, p.custom)}`}
+                label={t('Save as an image file')}
+                description={`${t('The uncompressed .img, for Ventoy and similar boot-from-file devices, or a virtual machine.')} ${bootNote(p.image, p.custom)}`}
                 body={p.method === 'file' ? (
                   <Stack hasGutter>
                     {fileRow(
-                      <Button variant="secondary" onClick={p.pickSave} isLoading={p.savePicking} isDisabled={p.savePicking}>Choose where to save</Button>,
-                      p.saveTarget ? p.saveTarget.path : 'No place chosen',
+                      <Button variant="secondary" onClick={p.pickSave} isLoading={p.savePicking} isDisabled={p.savePicking}>{t('Choose where to save')}</Button>,
+                      p.saveTarget ? p.saveTarget.path : t('No place chosen'),
                     )}
-                    {p.saveError && <Alert variant="danger" isInline isPlain title={p.saveError} />}
+                    {p.saveError && <Alert variant="danger" isInline isPlain title={msg(p.saveError)} />}
                   </Stack>
                 ) : undefined} />
             )}
@@ -605,49 +659,48 @@ function DestinationStep(p: {
         )}
 
         {p.method === 'sd' && (
-          <FormGroup fieldId="drives" label="Drive"
+          <FormGroup fieldId="drives" label={t('Drive')}
             labelInfo={(
               <Flex className="drive-actions" spaceItems={{ default: 'spaceItemsLg' }} alignItems={{ default: 'alignItemsCenter' }}
                 justifyContent={{ default: 'justifyContentFlexEnd' }} flexWrap={{ default: 'nowrap' }}>
                 {p.showInternal !== null && (
                   <FlexItem>
-                    <Switch id="show-internal" className="show-internal" label="Show internal disks" isChecked={p.showInternal}
+                    <Switch id="show-internal" className="show-internal" label={t('Show internal disks')} isChecked={p.showInternal}
                       onChange={(_e, v) => p.setShowInternal(v)} aria-describedby="show-internal-note" />
                   </FlexItem>
                 )}
-                <FlexItem><Button variant="link" isInline onClick={() => p.refreshDrives()}>Refresh</Button></FlexItem>
+                <FlexItem><Button variant="link" isInline onClick={() => p.refreshDrives()}>{t('Refresh')}</Button></FlexItem>
               </Flex>
             )}>
             {p.showInternal && (
               <div id="show-internal-note" className="muted">
-                Built-in disks (a board&apos;s eMMC, SD card slot or NVMe drive) are listed after the removable drives, only
-                when nothing on them is mounted or in use. The disk the system runs from never is.
+                {t("Built-in disks (a board's eMMC, SD card slot or NVMe drive) are listed after the removable drives, only when nothing on them is mounted or in use. The disk the system runs from never is.")}
               </div>
             )}
-            {!p.drives ? <Spinner size="md" aria-label="Looking for drives" /> : p.drives.targets.length === 0 ? (
-              <Content component="p">No SD card or USB drive found. Insert one and click Refresh.</Content>
+            {!p.drives ? <Spinner size="md" aria-label={t('Looking for drives')} /> : p.drives.targets.length === 0 ? (
+              <Content component="p">{t('No SD card or USB drive found. Insert one and click Refresh.')}</Content>
             ) : (
-              <Table aria-label="Drives" variant="compact" id="drives">
-                <Thead><Tr><Th screenReaderText="Select" /><Th>Drive</Th><Th>Device</Th><Th modifier="nowrap">Size</Th></Tr></Thead>
+              <Table aria-label={t('Drives')} variant="compact" id="drives">
+                <Thead><Tr><Th screenReaderText={t('Select')} /><Th>{t('Drive')}</Th><Th>{t('Device')}</Th><Th modifier="nowrap">{t('Size')}</Th></Tr></Thead>
                 <Tbody>
-                  {p.drives.targets.map((t, i) => (
-                    <Tr key={t.device} isClickable={!t.disabled} onRowClick={() => !t.disabled && p.setDevice(t.device)} isRowSelected={p.device === t.device}>
-                      <Td select={{ rowIndex: i, variant: 'radio', isSelected: p.device === t.device, isDisabled: !!t.disabled, onSelect: () => p.setDevice(t.device) }} />
-                      <Td dataLabel="Drive">
-                        {t.internal ? `${INTERNAL_WORDS[t.internal]}${t.description ? `: ${t.description}` : ''}` : t.description}
-                        {t.disabled && <div className="muted">{t.disabled}</div>}
-                        {t.warning && !t.disabled && <div className="muted">{t.warning}</div>}
+                  {p.drives.targets.map((d, i) => (
+                    <Tr key={d.device} isClickable={!d.disabled} onRowClick={() => !d.disabled && p.setDevice(d.device)} isRowSelected={p.device === d.device}>
+                      <Td select={{ rowIndex: i, variant: 'radio', isSelected: p.device === d.device, isDisabled: !!d.disabled, onSelect: () => p.setDevice(d.device) }} />
+                      <Td dataLabel={t('Drive')}>
+                        {d.internal ? `${t(INTERNAL_WORDS[d.internal])}${d.description ? `: ${d.description}` : ''}` : d.description}
+                        {d.disabled && <div className="muted">{msg(d.disabled)}</div>}
+                        {d.warning && !d.disabled && <div className="muted">{msg(d.warning)}</div>}
                       </Td>
-                      <Td dataLabel="Device">{t.device}</Td>
-                      <Td dataLabel="Size" modifier="nowrap">{formatBytes(t.size)}</Td>
+                      <Td dataLabel={t('Device')}>{d.device}</Td>
+                      <Td dataLabel={t('Size')} modifier="nowrap">{formatBytes(d.size)}</Td>
                     </Tr>
                   ))}
                 </Tbody>
               </Table>
             )}
             {p.drives && p.drives.hidden.length > 0 && (
-              <ExpandableSection toggleText={`${p.drives.hidden.length} ${p.drives.hidden.length === 1 ? 'drive is' : 'drives are'} not offered`}>
-                <Content component="ul">{p.drives.hidden.map((h) => <li key={h.device}>{h.device} {h.description}: {h.reason}</li>)}</Content>
+              <ExpandableSection toggleText={t(p.drives.hidden.length === 1 ? '{n} drive is not offered' : '{n} drives are not offered', { n: p.drives.hidden.length })}>
+                <Content component="ul">{p.drives.hidden.map((h) => <li key={h.device}>{h.device} {h.description}: {msg(h.reason)}</li>)}</Content>
               </ExpandableSection>
             )}
           </FormGroup>
@@ -655,46 +708,67 @@ function DestinationStep(p: {
 
         {p.method === 'maskrom' && mb && (
           <>
-            <FormGroup role="radiogroup" fieldId="storage" label="Storage" isStack>
+            <FormGroup role="radiogroup" fieldId="storage" label={t('Storage')} isStack>
               {mb.storages.map((s) => (
                 <Radio key={s} id={`storage-${s}`} name="storage" isChecked={p.storage === s} onChange={() => p.setStorage(s)}
-                  label={STORAGES[s].label} description={STORAGES[s].note} />
+                  label={t(STORAGES[s].label)} description={t(STORAGES[s].note)} />
               ))}
             </FormGroup>
-            <FormGroup role="radiogroup" fieldId="source" label="What to write" isStack>
+            <FormGroup role="radiogroup" fieldId="source" label={t('What to write')} isStack>
               <Radio id="src-release" name="source" isChecked={p.source === 'release'} onChange={() => p.setSource('release')}
                 isDisabled={!p.storage || !mb.wholeImage.includes(p.storage)}
-                label={p.image ? `The image chosen in the previous step (${p.image.file})` : 'The image chosen in the previous step'}
+                label={p.image ? t('The image chosen in the previous step ({file})', { file: p.image.file }) : t('The image chosen in the previous step')}
                 description={p.storage && mb.wholeImage.includes(p.storage) ? undefined
-                  : mb.imageNote ?? `A whole image goes to ${mb.wholeImage.map((s) => STORAGES[s].label).join(' or ')}.`}
+                  : mb.imageNote ? t(mb.imageNote) : t('A whole image goes to {storages}.', { storages: mb.wholeImage.map((s) => t(STORAGES[s].label)).join(t(' or ')) })}
                 body={releasePicker('image')} />
               {mb.storages.includes('spinor') && (
                 <Radio id="src-spi" name="source" isChecked={p.source === 'spi'} onChange={() => p.setSource('spi')}
                   isDisabled={!p.image?.spi || p.storage !== 'spinor'}
-                  label={p.image?.spi ? `This release's SPI bootloader (${p.image.spi.file}, ${formatBytes(p.image.spi.size)})` : "This release's SPI bootloader"}
-                  description={!p.image?.spi ? 'This release has no SPI bootloader for the board.'
-                    : viaProxy ? 'Downloaded from the release and checked against its SHA-256, then read back after writing.'
-                    : WEB ? 'Checked against the release SHA-256 when you choose it, then read back after writing.'
-                      : 'Downloaded from the release and checked against its SHA-256, then read back after writing.'}
+                  label={p.image?.spi ? t("This release's SPI bootloader ({file}, {size})", { file: p.image.spi.file, size: formatBytes(p.image.spi.size) }) : t("This release's SPI bootloader")}
+                  description={!p.image?.spi ? t('This release has no SPI bootloader for the board.')
+                    : viaProxy ? t('Downloaded from the release and checked against its SHA-256, then read back after writing.')
+                    : WEB ? t('Checked against the release SHA-256 when you choose it, then read back after writing.')
+                      : t('Downloaded from the release and checked against its SHA-256, then read back after writing.')}
                   body={releasePicker('spi')} />
               )}
               <Radio id="src-file" name="source" isChecked={p.source === 'file'} onChange={() => p.setSource('file')}
-                label="A file on this computer"
-                description={p.storage === 'spinor' ? 'A bootloader file (.img, .bin, or compressed with xz, gzip or bzip2), no larger than the SPI NOR flash. It is written from the first sector.'
-                  : 'An image or bootloader file (.img, .bin, or compressed with xz, gzip or bzip2). It is written from the first sector.'}
+                label={t('A file on this computer')}
+                description={p.storage === 'spinor' ? t('A bootloader file (.img, .bin, or compressed with xz, gzip or bzip2), no larger than the SPI NOR flash. It is written from the first sector.')
+                  : t('An image or bootloader file (.img, .bin, or compressed with xz, gzip or bzip2). It is written from the first sector.')}
                 body={p.source === 'file' ? fileRow(
-                  <Button variant="secondary" onClick={p.pickFile} isLoading={p.picking} isDisabled={p.picking}>Choose file</Button>,
-                  p.file ? `${p.file.name}, ${formatBytes(p.file.size)}` : 'No file chosen',
+                  <Button variant="secondary" onClick={p.pickFile} isLoading={p.picking} isDisabled={p.picking}>{t('Choose file')}</Button>,
+                  p.file ? `${p.file.name}, ${formatBytes(p.file.size)}` : t('No file chosen'),
                 ) : undefined} />
-              {p.fileError && <Alert variant="danger" isInline isPlain title={p.fileError} />}
-              {p.spiProblem && <Alert variant="danger" isInline isPlain title={p.spiProblem} />}
+              {api.pickUpdateImage && mb.storages.includes('emmc') && (
+                <Radio id="src-update" name="source" isChecked={p.source === 'update'} onChange={() => p.setSource('update')}
+                  isDisabled={p.storage !== 'emmc'}
+                  label={t("A Rockchip update.img (a vendor's factory firmware package)")}
+                  description={p.storage !== 'emmc' ? t('For the eMMC only.')
+                    : t("Written as RKDevTool's Upgrade Firmware does: the partition table from its parameter.txt, its loader, then each partition where parameter.txt puts it. Refused for another chip. Not yet tried on a board.")}
+                  body={p.source === 'update' ? (
+                    <Stack hasGutter>
+                      {fileRow(
+                        <Button variant="secondary" onClick={p.pickUpdate} isLoading={p.picking} isDisabled={p.picking}>{t('Choose update.img')}</Button>,
+                        p.updateFile ? `${p.updateFile.name}, ${formatBytes(p.updateFile.size)}` : t('No file chosen'),
+                      )}
+                      {p.updateFile && <Content component="p" className="detail">{updateWords(p.updateFile)}</Content>}
+                    </Stack>
+                  ) : undefined} />
+              )}
+              {(p.source === 'release' || p.source === 'file') && (p.storage === 'emmc' || p.storage === 'sd') && (
+                <Checkbox id="clear-gpt" isChecked={p.clearGpt} onChange={(_e, v) => p.setClearGpt(v)}
+                  label={t('Also clear the old backup partition table at the end of the storage')}
+                  description={t('A GPT keeps a copy of itself in the last 33 sectors. An image smaller than the storage leaves the old copy there, and some tools then report a damaged or stale partition table. With this ticked those sectors are zeroed after the image is written; they are not read back.')} />
+              )}
+              {p.fileError && <Alert variant="danger" isInline isPlain title={msg(p.fileError)} />}
+              {p.spiProblem && <Alert variant="danger" isInline isPlain title={msg(p.spiProblem)} />}
             </FormGroup>
-            <FormGroup fieldId="connect" label="Connect the board in Maskrom mode">
+            <FormGroup fieldId="connect" label={t('Connect the board in Maskrom mode')}>
               <Content id="connect">
                 <ol>
-                  <li>Disconnect power from the board.</li>
-                  <li>Hold the Maskrom button and connect the board's USB-C port to this computer.</li>
-                  <li>Release the button after two seconds.</li>
+                  <li>{t('Disconnect power from the board.')}</li>
+                  <li>{t("Hold the Maskrom button and connect the board's USB-C port to this computer.")}</li>
+                  <li>{t('Release the button after two seconds.')}</li>
                 </ol>
                 <DriversNote />
               </Content>
@@ -715,11 +789,11 @@ function ReviewFooter({ canWrite, why, onWrite, save }: { canWrite: boolean; why
         {why && <Content component="p" className="footer-note">{why}</Content>}
         <ActionList>
           <ActionListGroup>
-            <ActionListItem><Button variant="secondary" onClick={goToPrevStep}>Back</Button></ActionListItem>
+            <ActionListItem><Button variant="secondary" onClick={goToPrevStep}>{t('Back')}</Button></ActionListItem>
             <ActionListItem>
               {/* A save erases nothing: the save dialog already asked before replacing a file. */}
-              {save ? <Button variant="primary" onClick={onWrite} isDisabled={!canWrite}>Save</Button>
-                : <Button variant="danger" onClick={onWrite} isDisabled={!canWrite}>Erase and write</Button>}
+              {save ? <Button variant="primary" onClick={onWrite} isDisabled={!canWrite}>{t('Save')}</Button>
+                : <Button variant="danger" onClick={onWrite} isDisabled={!canWrite}>{t('Erase and write')}</Button>}
             </ActionListItem>
           </ActionListGroup>
         </ActionList>
@@ -730,11 +804,11 @@ function ReviewFooter({ canWrite, why, onWrite, save }: { canWrite: boolean; why
 
 /* The write itself replaces the wizard, as the installer's progress page does. */
 function RunView({ run, onCancel, onDone, reconnect }: { run: Run; onCancel: () => void; onDone: () => void; reconnect: boolean }) {
-  const working = run.kind === 'file' ? 'Saving' : 'Writing';
+  const working = run.kind === 'file' ? t('Saving') : t('Writing');
   return (
     <PageSection isFilled aria-label={working}>
       <Stack hasGutter className="step">
-        <Title headingLevel="h2">{run.result ? (run.result.ok ? 'Done' : 'Stopped') : working}</Title>
+        <Title headingLevel="h2">{run.result ? (run.result.ok ? t('Done') : t('Stopped')) : working}</Title>
         {/* Twice the space between stages as between a stage's title and its bar. */}
         <Flex direction={{ default: 'column' }} spaceItems={{ default: 'spaceItemsXl' }}>
           {run.stages.map((s) => (
@@ -743,7 +817,7 @@ function RunView({ run, onCancel, onDone, reconnect }: { run: Run; onCancel: () 
                 title={s.label + (s.detail ? `: ${s.detail}` : '')}
                 value={s.percent ?? 0}
                 // A stage with no percentage (the loader) says so in words.
-                {...(s.percent === null ? { label: s.done ?? 'Waiting', valueText: s.done ?? 'Waiting' } : {})}
+                {...(s.percent === null ? { label: s.done ?? t('Waiting'), valueText: s.done ?? t('Waiting') } : {})}
                 measureLocation={ProgressMeasureLocation.top}
                 aria-label={s.label}
               />
@@ -751,9 +825,9 @@ function RunView({ run, onCancel, onDone, reconnect }: { run: Run; onCancel: () 
           ))}
         </Flex>
         {reconnect && !run.result && (
-          <Alert isInline variant="info" title="Choose the board again"
-            actionLinks={<Button variant="secondary" onClick={() => { navigator.usb.requestDevice({ filters: [{ vendorId: 0x2207 }] }).catch(() => {}); }}>Choose the board</Button>}>
-            The board restarted with the loader. The browser needs you to pick it once more.
+          <Alert isInline variant="info" title={t('Choose the board again')}
+            actionLinks={<Button variant="secondary" onClick={() => { navigator.usb.requestDevice({ filters: [{ vendorId: 0x2207 }] }).catch(() => {}); }}>{t('Choose the board')}</Button>}>
+            {t('The board restarted with the loader. The browser needs you to pick it once more.')}
           </Alert>
         )}
         {run.result && (
@@ -763,19 +837,19 @@ function RunView({ run, onCancel, onDone, reconnect }: { run: Run; onCancel: () 
           </Alert>
         )}
         <StackItem>
-          {!run.result ? <Button variant="secondary" onClick={onCancel}>Cancel</Button> : (
+          {!run.result ? <Button variant="secondary" onClick={onCancel}>{t('Cancel')}</Button> : (
             <ActionList>
               <ActionListGroup>
-                <ActionListItem><Button variant="primary" onClick={onDone}>{run.kind === 'file' ? 'Start over' : 'Write another'}</Button></ActionListItem>
+                <ActionListItem><Button variant="primary" onClick={onDone}>{run.kind === 'file' ? t('Start over') : t('Write another')}</Button></ActionListItem>
                 {run.result.ok && run.saved && api.showSavedFile && (
-                  <ActionListItem><Button variant="secondary" onClick={() => api.showSavedFile!(run.saved!)}>Show in folder</Button></ActionListItem>
+                  <ActionListItem><Button variant="secondary" onClick={() => api.showSavedFile!(run.saved!)}>{t('Show in folder')}</Button></ActionListItem>
                 )}
               </ActionListGroup>
             </ActionList>
           )}
         </StackItem>
         {run.log.length > 0 && (
-          <ExpandableSection toggleText="rkdeveloptool output" className="log">
+          <ExpandableSection toggleText={t('rkdeveloptool output')} className="log">
             <CodeBlock><CodeBlockCode>{run.log.slice(-400).join('\n')}</CodeBlockCode></CodeBlock>
           </ExpandableSection>
         )}
@@ -804,7 +878,7 @@ function CopyBlock({ text }: { text: string }) {
   const actions = (
     <CodeBlockAction>
       <Button variant="link" className="copy-button" aria-live="polite" onClick={() => { copyText(text); setCopied(true); }}>
-        {copied ? 'Copied' : 'Copy'}
+        {copied ? t('Copied') : t('Copy')}
       </Button>
     </CodeBlockAction>
   );
@@ -814,13 +888,12 @@ function CopyBlock({ text }: { text: string }) {
 /** What pressing Update will do, by how this copy was installed. Shown before anything is downloaded. */
 function updatePlan(o: UpdateOffer): string {
   const file = o.asset ? `${o.asset.name} (${formatBytes(o.asset.size)})` : '';
-  const checked = 'checks it against the SHA-256 GitHub lists for it';
   switch (o.kind) {
-    case 'brew': return 'This copy was installed with Homebrew. Roxora Imager runs Homebrew for you: "brew update", then "brew upgrade --cask roxora-imager". You then restart the app.';
-    case 'dmg': return `Roxora Imager downloads ${file} to your Downloads folder, ${checked}, and puts the new app in place of this one. You then restart the app.`;
-    case 'windows': return `Roxora Imager downloads the installer ${file}, ${checked}, then closes and starts the installer.`;
-    case 'appimage': return `Roxora Imager downloads ${file}, ${checked}, and puts it in place of the AppImage you are running. You then restart the app.`;
-    case 'deb': case 'rpm': return `Roxora Imager downloads ${file}, ${checked}, and installs it with the system's package manager, which asks for your password. You then restart the app.`;
+    case 'brew': return t('This copy was installed with Homebrew. Roxora Imager runs Homebrew for you: "brew update", then "{command}". You then restart the app.', { command: brewCommand(o.ci ? 'roxora-imager@nightly' : undefined) });
+    case 'dmg': return t('Roxora Imager downloads {file} to your Downloads folder, checks it against the SHA-256 GitHub lists for it, and puts the new app in place of this one. You then restart the app.', { file });
+    case 'windows': return t('Roxora Imager downloads the installer {file}, checks it against the SHA-256 GitHub lists for it, then closes and starts the installer.', { file });
+    case 'appimage': return t('Roxora Imager downloads {file}, checks it against the SHA-256 GitHub lists for it, and puts it in place of the AppImage you are running. You then restart the app.', { file });
+    case 'deb': case 'rpm': return t("Roxora Imager downloads {file}, checks it against the SHA-256 GitHub lists for it, and installs it with the system's package manager, which asks for your password. You then restart the app.", { file });
     default: return '';
   }
 }
@@ -853,58 +926,57 @@ function UpdateModal({ offer, onClose }: { offer: UpdateOffer | null; onClose: (
     setResult(r);
   };
   const close = () => { if (!busy) onClose(); };
-  const notes = <Button variant="link" isInline component="a" href={offer.url} target="_blank">Release notes</Button>;
+  const notes = <Button variant="link" isInline component="a" href={offer.url} target="_blank">{t('Release notes')}</Button>;
   // Once the app itself is being replaced there is no stopping half way.
   const canCancel = stage === 'download' || stage === 'brew-update';
   const working: Record<string, string> = {
-    'brew-update': 'Homebrew is looking for the new version',
-    'brew-upgrade': 'Homebrew is installing the new version. Do not quit Roxora Imager.',
-    install: 'Putting the new app in place. Do not quit Roxora Imager.',
+    'brew-update': t('Homebrew is looking for the new version'),
+    'brew-upgrade': t('Homebrew is installing the new version. Do not quit Roxora Imager.'),
+    install: t('Putting the new app in place. Do not quit Roxora Imager.'),
   };
   return (
     <Modal isOpen onClose={close} variant="small" aria-labelledby="update-title">
-      <ModalHeader title={`Update to Roxora Imager ${offer.version}${offer.beta ? ' (beta)' : ''}`} labelId="update-title" />
+      <ModalHeader title={t('Update to Roxora Imager {version}', { version: offerName(offer) })} labelId="update-title" />
       <ModalBody>
         <Stack hasGutter>
           {brew && !canInstall && (
             <>
-              <Content component="p">This copy was installed with Homebrew. Update it in Terminal with:</Content>
-              <CopyBlock text="brew upgrade --cask roxora-imager" />
+              <Content component="p">{t('This copy was installed with Homebrew. Update it in Terminal with:')}</Content>
+              <CopyBlock text={brewCommand(offer.ci ? 'roxora-imager@nightly' : undefined)} />
             </>
           )}
           {apt && (
             <>
               <Content component="p">
-                This copy was installed from a package repository, and the system's software updates keep it up to date.
-                Roxora Imager {offer.version} comes with them once the repository has it. To update now, in a terminal:
+                {t("This copy was installed from a package repository, and the system's software updates keep it up to date. Roxora Imager {version} comes with them once the repository has it. To update now, in a terminal:", { version: offer.version })}
               </Content>
               <CopyBlock text={APT_COMMAND} />
             </>
           )}
           {!brew && !apt && !canInstall && (
             <Content component="p">
-              The app cannot update this copy itself{offer.kind === 'none' ? '' : ': the release has no package for this computer'}.
-              Get the new version from the release page.
+              {t(offer.kind === 'none' ? 'The app cannot update this copy itself. Get the new version from the release page.'
+                : 'The app cannot update this copy itself: the release has no package for this computer. Get the new version from the release page.')}
             </Content>
           )}
           {canInstall && !busy && !result && <Content component="p">{updatePlan(offer)}</Content>}
           {busy && stage === 'download' && progress && (
-            <Progress title={`Downloading ${offer.asset?.name ?? ''}`} measureLocation={ProgressMeasureLocation.top}
+            <Progress title={t('Downloading {name}', { name: offer.asset?.name ?? '' })} measureLocation={ProgressMeasureLocation.top}
               value={progress.total ? Math.min(100, Math.floor(progress.bytes * 100 / progress.total)) : 0}
-              label={`${formatBytes(progress.bytes)} of ${formatBytes(progress.total)}`} />
+              label={t('{done} of {total}', { done: formatBytes(progress.bytes), total: formatBytes(progress.total) })} />
           )}
           {busy && stage !== 'download' && (
             <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }} flexWrap={{ default: 'nowrap' }}>
-              <FlexItem flex={{ default: 'flexNone' }}><Spinner size="md" aria-label="Working" /></FlexItem>
-              <FlexItem>{working[stage] ?? 'Installing'}</FlexItem>
+              <FlexItem flex={{ default: 'flexNone' }}><Spinner size="md" aria-label={t('Working')} /></FlexItem>
+              <FlexItem>{working[stage] ?? t('Installing')}</FlexItem>
             </Flex>
           )}
           {result && (
-            <Alert isInline variant={result.ok ? 'success' : 'danger'} title={result.ok ? result.message : result.reason} />
+            <Alert isInline variant={result.ok ? 'success' : 'danger'} title={msg(result.ok ? result.message : result.reason)} />
           )}
           {result && !result.ok && result.command && <CopyBlock text={result.command} />}
           {log && (
-            <ExpandableSection toggleText="Output" className="log">
+            <ExpandableSection toggleText={t('Output')} className="log">
               <CodeBlock><CodeBlockCode>{log}</CodeBlockCode></CodeBlock>
             </ExpandableSection>
           )}
@@ -912,11 +984,11 @@ function UpdateModal({ offer, onClose }: { offer: UpdateOffer | null; onClose: (
         </Stack>
       </ModalBody>
       <ModalFooter>
-        {canInstall && !busy && !result && <Button variant="primary" onClick={start}>{brew ? 'Update with Homebrew' : 'Download and install'}</Button>}
-        {busy && canCancel && <Button variant="secondary" onClick={() => api.cancelUpdate?.()}>Cancel</Button>}
-        {result?.ok && result.restart && <Button variant="primary" onClick={() => api.restartApp?.()}>Restart now</Button>}
-        {result && !result.ok && canInstall && <Button variant="secondary" onClick={start}>Try again</Button>}
-        {!busy && <Button variant="link" onClick={close}>{result?.ok && result.restart ? 'Later' : result || !canInstall ? 'Close' : 'Cancel'}</Button>}
+        {canInstall && !busy && !result && <Button variant="primary" onClick={start}>{brew ? t('Update with Homebrew') : t('Download and install')}</Button>}
+        {busy && canCancel && <Button variant="secondary" onClick={() => api.cancelUpdate?.()}>{t('Cancel')}</Button>}
+        {result?.ok && result.restart && <Button variant="primary" onClick={() => api.restartApp?.()}>{t('Restart now')}</Button>}
+        {result && !result.ok && canInstall && <Button variant="secondary" onClick={start}>{t('Try again')}</Button>}
+        {!busy && <Button variant="link" onClick={close}>{result?.ok && result.restart ? t('Later') : result || !canInstall ? t('Close') : t('Cancel')}</Button>}
       </ModalFooter>
     </Modal>
   );
@@ -924,14 +996,27 @@ function UpdateModal({ offer, onClose }: { offer: UpdateOffer | null; onClose: (
 
 /** The answer to "Check now", in a sentence. */
 function checkWords(c: UpdateCheck): string {
-  if (c.state === 'error') return c.message;
-  if (c.state === 'newer') return `Roxora Imager ${c.offer.version}${c.offer.beta ? ' (beta)' : ''} is available.`;
-  const beta = c.newerBeta ? ` A newer beta, ${c.newerBeta}, is out; turn on beta versions to be offered it.` : '';
-  return (c.beta ? `You have ${c.version}, a beta version. There is no newer normal release yet.`
-    : `You have the newest version (${c.version}).`) + beta;
+  if (c.state === 'error') return msg(c.message);
+  if (c.state === 'newer') return t('Roxora Imager {version} is available.', { version: offerName(c.offer) });
+  if (c.ci) return t('You have the newest CI build ({version}), or there is none yet.', { version: c.version });
+  const beta = c.newerBeta ? t(' A newer beta, {version}, is out; choose Prerelease to be offered it.', { version: c.newerBeta }) : '';
+  return (c.beta ? t('You have {version}, a beta version. There is no newer normal release yet.', { version: c.version })
+    : t('You have the newest version ({version}).', { version: c.version })) + beta;
 }
 
-type AppSettings = { updateCheck: boolean; betaUpdates?: boolean; resetAfterMaskrom: boolean };
+/** "0.1.11", "0.1.12-beta.1 (beta)", or "CI build 1a2b3c4 (untested)". */
+function offerName(o: UpdateOffer): string {
+  return `${o.ci ? t('CI build {commit}', { commit: o.version.replace(/^CI build /, '') }) : o.version}${o.ci ? t(' (untested)') : o.beta ? t(' (beta)') : ''}`;
+}
+
+const TIER_NAMES: Record<Channel, string> = { stable: 'Stable', prerelease: 'Prerelease', ci: 'CI' };
+const TIER_HELP: Record<Channel, string> = {
+  stable: 'Normal releases only.',
+  prerelease: 'Betas too (pre-releases on GitHub), before they become a normal release.',
+  ci: 'The latest build of main from the Release workflow: untested, replaced on every successful build.',
+};
+
+type AppSettings = { updateCheck: boolean; appChannel?: Channel; resetAfterMaskrom: boolean };
 
 function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writing, onAbout }: {
   open: boolean; onClose: () => void; theme: Theme; setTheme: (t: Theme) => void;
@@ -943,6 +1028,7 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
   onUpdate: () => void;
   writing: boolean;
 }) {
+  const { lang, setLang } = useI18n();
   const [s, setS] = useState<AppSettings | null>(null);
   const [check, setCheck] = useState<UpdateCheck | null>(null);
   const [checking, setChecking] = useState(false);
@@ -960,7 +1046,7 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
   const doClear = async () => {
     const r = await api.clearCache!();
     setClearAsk(false);
-    setCleared(r.ok ? `Cleared: ${formatBytes(r.freed)} freed.` : r.reason);
+    setCleared(r.ok ? t('Cleared: {size} freed.', { size: formatBytes(r.freed) }) : msg(r.reason));
     api.cacheInfo?.().then(setCache);
   };
   const set = (patch: Partial<AppSettings>) => {
@@ -977,93 +1063,106 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
   return (
     <>
     <Modal isOpen={open} onClose={onClose} variant="small" aria-labelledby="settings-title">
-      <ModalHeader title="Settings" labelId="settings-title" />
+      <ModalHeader title={t('Settings')} labelId="settings-title" />
       <ModalBody>
         {s && (
           <Form onSubmit={(e) => e.preventDefault()}>
             {!WEB && (
-              <FormSection title="Updates" titleElement="h3">
-                <FormGroup fieldId="set-update" label="Automatic check" hasNoPaddingTop>
-                  <Switch id="set-update" label="Check for a new version once a day" isChecked={s.updateCheck}
+              <FormSection title={t('Updates')} titleElement="h3">
+                <FormGroup fieldId="set-update" label={t('Automatic check')} hasNoPaddingTop>
+                  <Switch id="set-update" label={t('Check for a new version once a day')} isChecked={s.updateCheck}
                     onChange={(_e, v) => { set({ updateCheck: v }); }} />
                 </FormGroup>
-                <FormGroup fieldId="set-beta" label="Beta versions" hasNoPaddingTop>
-                  <Switch id="set-beta" label="Also offer beta versions" isChecked={s.betaUpdates === true}
-                    onChange={(_e, v) => { set({ betaUpdates: v }).then(checkNow); }} />
-                  <FormHelperText><HelperText><HelperTextItem>Pre-releases on GitHub, before they become a normal release.</HelperTextItem></HelperText></FormHelperText>
+                <FormGroup fieldId="app-channel" label={t('Release tier')} role="group">
+                  <ToggleGroup aria-label={t('Release tier')} id="app-channel">
+                    {CHANNELS.map((c) => (
+                      <ToggleGroupItem key={c} text={t(TIER_NAMES[c])} buttonId={`tier-${c}`} isSelected={(s.appChannel ?? 'stable') === c}
+                        onChange={() => { set({ appChannel: c }).then(checkNow); }} />
+                    ))}
+                  </ToggleGroup>
+                  <FormHelperText><HelperText><HelperTextItem variant={(s.appChannel ?? 'stable') === 'stable' ? 'default' : 'warning'}>
+                    {t(TIER_HELP[s.appChannel ?? 'stable'])}
+                  </HelperTextItem></HelperText></FormHelperText>
                 </FormGroup>
                 <FormGroup fieldId="check-now">
                   <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
                     <FlexItem flex={{ default: 'flexNone' }}>
-                      <Button id="check-now" variant="secondary" onClick={checkNow} isLoading={checking} isDisabled={checking}>Check now</Button>
+                      <Button id="check-now" variant="secondary" onClick={checkNow} isLoading={checking} isDisabled={checking}>{t('Check now')}</Button>
                     </FlexItem>
                     {check && <FlexItem className="update-result" aria-live="polite">{checkWords(check)}</FlexItem>}
                     {check?.state === 'newer' && (
-                      <FlexItem><Button variant="link" isInline isDisabled={writing} onClick={onUpdate}>Update</Button></FlexItem>
+                      <FlexItem><Button variant="link" isInline isDisabled={writing} onClick={onUpdate}>{t('Update')}</Button></FlexItem>
                     )}
                   </Flex>
                 </FormGroup>
               </FormSection>
             )}
             <FormSection title="Maskrom" titleElement="h3">
-              <FormGroup fieldId="set-reset" label="After writing" hasNoPaddingTop>
-                <Switch id="set-reset" label="Restart the board after a Maskrom write" isChecked={s.resetAfterMaskrom}
+              <FormGroup fieldId="set-reset" label={t('After writing')} hasNoPaddingTop>
+                <Switch id="set-reset" label={t('Restart the board after a Maskrom write')} isChecked={s.resetAfterMaskrom}
                   onChange={(_e, v) => { set({ resetAfterMaskrom: v }); }} />
               </FormGroup>
             </FormSection>
             {api.cacheInfo && (
-              <FormSection title="Downloads" titleElement="h3">
+              <FormSection title={t('Downloads')} titleElement="h3">
                 <FormGroup fieldId="clear-cache">
                   <Content component="p">{cache
-                    ? `${formatBytes(cacheBytes)} in downloaded images and Maskrom loaders (files: ${cache.images.files + cache.loaders.files}), downloaded or built again when needed.`
-                    : 'Measuring the downloads.'}</Content>
+                    ? t('{size} in downloaded images and Maskrom loaders (files: {files}), downloaded or built again when needed.', { size: formatBytes(cacheBytes), files: cache.images.files + cache.loaders.files })
+                    : t('Measuring the downloads.')}</Content>
                   <Flex><FlexItem>
-                    <Button id="clear-cache" variant="secondary" isDisabled={writing || !cache || cacheBytes === 0} onClick={() => setClearAsk(true)}>Clear cache</Button>
+                    <Button id="clear-cache" variant="secondary" isDisabled={writing || !cache || cacheBytes === 0} onClick={() => setClearAsk(true)}>{t('Clear cache')}</Button>
                   </FlexItem></Flex>
                   {(writing || cleared) && (
-                    <FormHelperText><HelperText><HelperTextItem>{writing ? 'Not while a write is running.' : cleared}</HelperTextItem></HelperText></FormHelperText>
+                    <FormHelperText><HelperText><HelperTextItem>{writing ? t('Not while a write is running.') : cleared}</HelperTextItem></HelperText></FormHelperText>
                   )}
                 </FormGroup>
               </FormSection>
             )}
-            <FormSection title="Appearance" titleElement="h3">
-              <FormGroup fieldId="appearance" label="Theme" role="group">
-                <ToggleGroup aria-label="Theme" id="appearance">
-                  {(['system', 'light', 'dark'] as Theme[]).map((t) => (
-                    <ToggleGroupItem key={t} text={t[0].toUpperCase() + t.slice(1)} isSelected={theme === t} onChange={() => setTheme(t)} />
+            <FormSection title={t('Appearance')} titleElement="h3">
+              <FormGroup fieldId="appearance" label={t('Theme')} role="group">
+                <ToggleGroup aria-label={t('Theme')} id="appearance">
+                  {(['system', 'light', 'dark'] as Theme[]).map((th) => (
+                    <ToggleGroupItem key={th} text={t(th[0].toUpperCase() + th.slice(1))} isSelected={theme === th} onChange={() => setTheme(th)} />
+                  ))}
+                </ToggleGroup>
+              </FormGroup>
+              <FormGroup fieldId="language" label={t('Language')} role="group">
+                <ToggleGroup aria-label={t('Language')} id="language">
+                  {LANGS.map((l) => (
+                    <ToggleGroupItem key={l} text={LANG_NAMES[l]} isSelected={lang === l} onChange={() => setLang(l)} />
                   ))}
                 </ToggleGroup>
               </FormGroup>
             </FormSection>
-            <FormSection title="Version" titleElement="h3">
+            <FormSection title={t('Version')} titleElement="h3">
               <FormGroup fieldId="about-open">
                 <Content component="p">{api.version}</Content>
                 <Flex><FlexItem>
-                  <Button id="about-open" variant="link" isInline onClick={onAbout}>About Roxora Imager</Button>
+                  <Button id="about-open" variant="link" isInline onClick={onAbout}>{t('About Roxora Imager')}</Button>
                 </FlexItem></Flex>
               </FormGroup>
             </FormSection>
           </Form>
         )}
       </ModalBody>
-      <ModalFooter><Button variant="primary" onClick={onClose}>Close</Button></ModalFooter>
+      <ModalFooter><Button variant="primary" onClick={onClose}>{t('Close')}</Button></ModalFooter>
     </Modal>
     {clearAsk && cache && (
       <Modal isOpen onClose={() => setClearAsk(false)} variant="small" aria-labelledby="clear-title">
-        <ModalHeader title="Clear the cache?" labelId="clear-title" />
+        <ModalHeader title={t('Clear the cache?')} labelId="clear-title" />
         <ModalBody>
           <Stack hasGutter>
-            <Content component="p">These are deleted, from {cache.images.dir.replace(/[\\/]images$/, '')}:</Content>
+            <Content component="p">{t('These are deleted, from {dir}:', { dir: cache.images.dir.replace(/[\\/]images$/, '') })}</Content>
             <List>
-              <ListItem>Downloaded images: {formatBytes(cache.images.bytes)}, files: {cache.images.files}{cache.images.names.length ? ` (${cache.images.names.join(', ')})` : ''}</ListItem>
-              <ListItem>Maskrom loaders built from rkbin: {formatBytes(cache.loaders.bytes)}, files: {cache.loaders.files}</ListItem>
+              <ListItem>{t('Downloaded images: {size}, files: {files}', { size: formatBytes(cache.images.bytes), files: cache.images.files })}{cache.images.names.length ? ` (${cache.images.names.join(', ')})` : ''}</ListItem>
+              <ListItem>{t('Maskrom loaders built from rkbin: {size}, files: {files}', { size: formatBytes(cache.loaders.bytes), files: cache.loaders.files })}</ListItem>
             </List>
-            <Content component="p">The settings are kept.</Content>
+            <Content component="p">{t('The settings are kept.')}</Content>
           </Stack>
         </ModalBody>
         <ModalFooter>
-          <Button variant="danger" onClick={doClear}>Delete {formatBytes(cacheBytes)}</Button>
-          <Button variant="link" onClick={() => setClearAsk(false)}>Cancel</Button>
+          <Button variant="danger" onClick={doClear}>{t('Delete {size}', { size: formatBytes(cacheBytes) })}</Button>
+          <Button variant="link" onClick={() => setClearAsk(false)}>{t('Cancel')}</Button>
         </ModalFooter>
       </Modal>
     )}
@@ -1096,14 +1195,14 @@ function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   if (!open) return null;
   const link = (href: string, text: string) => <a href={href} target="_blank" rel="noreferrer">{text}</a>;
   const rows: Array<[string, React.ReactNode]> = [
-    ['Version', `${api.version} (${BUILD.commit}${BUILD.date ? `, ${BUILD.date}` : ''})`],
-    ['Design system', BUILD.patternfly ? `PatternFly ${BUILD.patternfly}` : 'PatternFly'],
+    [t('Version'), `${api.version} (${BUILD.commit}${BUILD.date ? `, ${BUILD.date}` : ''})`],
+    [t('Design system'), BUILD.patternfly ? `PatternFly ${BUILD.patternfly}` : 'PatternFly'],
     ...(WEB ? [] : [
-      ['Network', `GitHub (the Roxora releases and this app's updates), and ${RKBIN_HOST} once for Rockchip's rkbin. No analytics or telemetry.`],
-      ['Kept on your device', <>Settings and downloads, in <span className="selectable">{api.dataDir}</span>; Settings has Clear cache</>],
+      [t('Network'), t("GitHub (the Roxora releases and this app's updates), and {host} once for Rockchip's rkbin. No analytics or telemetry.", { host: RKBIN_HOST })],
+      [t('Kept on your device'), <>{t('Settings and downloads, in')} <span className="selectable">{api.dataDir}</span>{t('; Settings has Clear cache')}</>],
     ] as Array<[string, React.ReactNode]>),
-    ['Licence', 'GPL-2.0-only'],
-    ['Source', link('https://github.com/roxora-os/imager', 'github.com/roxora-os/imager')],
+    [t('Licence'), 'GPL-2.0-only'],
+    [t('Source'), link('https://github.com/roxora-os/imager', 'github.com/roxora-os/imager')],
   ];
   // On the document body, as PatternFly's Modal does, so the backdrop covers the masthead too.
   return createPortal(
@@ -1112,10 +1211,10 @@ function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
         <div className="pf-v6-c-about-modal-box" role="dialog" aria-modal="true" aria-labelledby="about-title">
           <div className="pf-v6-c-about-modal-box__brand"><img src="resources/roxora-mark.svg" alt="" className="about-mark" /></div>
           <div className="pf-v6-c-about-modal-box__close">
-            <Button ref={close} variant="plain" aria-label="Close About Roxora Imager" icon={<TimesIcon />} onClick={onClose} />
+            <Button ref={close} variant="plain" aria-label={t('Close About Roxora Imager')} icon={<TimesIcon />} onClick={onClose} />
           </div>
           <div className="pf-v6-c-about-modal-box__header">
-            <h1 className="pf-v6-c-title pf-m-2xl" id="about-title">About Roxora Imager</h1>
+            <h1 className="pf-v6-c-title pf-m-2xl" id="about-title">{t('About Roxora Imager')}</h1>
           </div>
           <div className="pf-v6-c-about-modal-box__content">
             <dl className="pf-v6-c-description-list pf-m-horizontal">
@@ -1135,8 +1234,10 @@ function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 }
 
 export function App() {
+  // Re-render the page in another language when it is chosen.
+  useI18n();
   const [theme, setThemeState] = useState<Theme>(readTheme());
-  const setTheme = (t: Theme) => { setThemeState(t); applyTheme(t); };
+  const setTheme = (th: Theme) => { setThemeState(th); applyTheme(th); };
   const [catalog, setCatalog] = useState<CatalogResult | null>(null);
   const [useSample, setUseSample] = useState(api.devSample);
   const [board, setBoard] = useState<string | null>(null);
@@ -1151,6 +1252,8 @@ export function App() {
   const [file, setFile] = useState<PreparedFile | null>(null);
   const [picking, setPicking] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [updateFile, setUpdateFile] = useState<UpdateImageFile | null>(null);
+  const [clearGpt, setClearGpt] = useState(false);
   const [releaseFile, setReleaseFile] = useState<PreparedFile | null>(null);
   const [checking, setChecking] = useState<Checking | null>(null);
   const [proxyError, setProxyError] = useState<string | null>(null);
@@ -1297,12 +1400,25 @@ export function App() {
     setFile(r);
   };
 
+  const pickUpdate = async () => {
+    if (!api.pickUpdateImage) return;
+    setPicking(true);
+    setFileError(null);
+    if (updateFile) api.releaseMaskrom(updateFile.token);
+    setUpdateFile(null);
+    const r = await api.pickUpdateImage();
+    setPicking(false);
+    if (!r) return;
+    if ('error' in r) { setFileError(r.error); return; }
+    setUpdateFile(r);
+  };
+
   const pickRelease = async () => {
     if (!image || !api.pickReleaseFile) return;
     setFileError(null);
-    setChecking({ label: 'Checking the file against the release', done: 0, total: 0 });
+    setChecking({ label: t('Checking the file against the release'), done: 0, total: 0 });
     const r = await api.pickReleaseFile(image.id, source === 'spi' ? 'spi' : 'image',
-      (d, t) => setChecking({ label: 'Checking the file against the release', done: d, total: t }));
+      (d, n) => setChecking({ label: t('Checking the file against the release'), done: d, total: n }));
     setChecking(null);
     if (!r) return;
     if ('error' in r) { setReleaseFile(null); setFileError(r.error); return; }
@@ -1311,9 +1427,9 @@ export function App() {
   const downloadRelease = async () => {
     if (!image || !api.downloadReleaseFile) return;
     setFileError(null);
-    setChecking({ label: 'Downloading and checking', done: 0, total: 0 });
+    setChecking({ label: t('Downloading and checking'), done: 0, total: 0 });
     const r = await api.downloadReleaseFile(image.id, source === 'spi' ? 'spi' : 'image',
-      (d, t) => setChecking({ label: 'Downloading and checking', done: d, total: t }));
+      (d, n) => setChecking({ label: t('Downloading and checking'), done: d, total: n }));
     setChecking(null);
     if ('error' in r) { setReleaseFile(null); setProxyError(r.error); return; }
     setReleaseFile(r);
@@ -1328,7 +1444,7 @@ export function App() {
   // What the file will take: unknown before reading for a gzip or bzip2 custom image.
   const saveNeed = custom ? local!.extractSize : image?.extractSize ?? local?.extractSize ?? 0;
   const saveShort = !!saveTarget && saveTarget.free >= 0 && saveNeed > 0 && saveTarget.free < saveNeed
-    ? `There is not enough free space in ${saveTarget.dir}: the image needs ${formatBytes(saveNeed)}, ${formatBytes(saveTarget.free)} is free. Choose another place.`
+    ? t('There is not enough free space in {dir}: the image needs {need}, {free} is free. Choose another place.', { dir: saveTarget.dir, need: formatBytes(saveNeed), free: formatBytes(saveTarget.free) })
     : null;
   const pickSave = async () => {
     if (!api.pickSaveFile || savePicking) return;
@@ -1350,51 +1466,52 @@ export function App() {
     }) : null;
   const destReady = method === 'sd' ? !!target
     : method === 'file' ? !!saveTarget && !saveShort
-    : !!storage && (source === 'file' ? !!file && !spiProblem
+    : !!storage && (source === 'update' ? !!updateFile && storage === 'emmc'
+      : source === 'file' ? !!file && !spiProblem
       : source === 'spi' ? !!image?.spi && storage === 'spinor' && (!WEB || !!releaseFile)
         : !!image && !!mb?.wholeImage.includes(storage) && (!WEB || !!releaseFile));
 
   let why: string | null = null;
-  if (sample && !custom) why = method === 'file' ? 'Sample data cannot be saved.' : 'Sample data cannot be written.';
-  else if (!destReady) why = 'Choose a destination first.';
+  if (sample && !custom) why = method === 'file' ? t('Sample data cannot be saved.') : t('Sample data cannot be written.');
+  else if (!destReady) why = t('Choose a destination first.');
 
   const erasedWhat = method === 'file' ? '' : method === 'sd'
-    ? (target ? `${target.internal ? `the built-in ${INTERNAL_WORDS[target.internal]}, ` : ''}${target.description} (${target.device}, ${formatBytes(target.size)})` : '')
-    : (storage && mb ? `the ${storage === 'sd' ? 'SD card in the board' : STORAGES[storage].label} (${mb.boardName}, connected over USB)` : '');
-  const erased = erasedWhat ? `Everything on ${erasedWhat}.` : '';
+    ? (target ? `${target.internal ? t('the built-in {kind}, ', { kind: t(INTERNAL_WORDS[target.internal]) }) : ''}${target.description} (${target.device}, ${formatBytes(target.size)})` : '')
+    : (storage && mb ? t('the {storage} ({board}, connected over USB)', { storage: t(STORAGES[storage].label), board: mb.boardName }) : '');
+  const erased = erasedWhat ? t('Everything on {what}.', { what: erasedWhat }) : '';
   const saveChecks = custom
-    ? 'Nothing is compared with a Roxora release; the SHA-256 of the saved image is shown when it is done. Until it is complete, it is a temporary file in the same folder, so a cancelled or failed save leaves nothing under the chosen name.'
-    : `${local ? 'The file is checked against the release SHA-256 again.' : 'The download is checked against the release SHA-256.'} The decompressed image must have the size and SHA-256 the release gives. Until then it is a temporary file in the same folder, so a cancelled or failed save leaves nothing under the chosen name.`;
+    ? t('Nothing is compared with a Roxora release; the SHA-256 of the saved image is shown when it is done. Until it is complete, it is a temporary file in the same folder, so a cancelled or failed save leaves nothing under the chosen name.')
+    : `${local ? t('The file is checked against the release SHA-256 again.') : t('The download is checked against the release SHA-256.')} ${t('The decompressed image must have the size and SHA-256 the release gives. Until then it is a temporary file in the same folder, so a cancelled or failed save leaves nothing under the chosen name.')}`;
 
   /** The progress of a drive write or a save, on the run's stages. Returns the unsubscribe. */
   const followProgress = () => api.onProgress((p: JobProgress) => {
     const id = p.stage === 'check' || p.stage === 'download' ? 'download' : p.stage;
     const pct = p.total ? Math.min(100, Math.floor(p.bytes * 100 / p.total)) : null;
     // A save of a gzip or bzip2 image does not know its size: bytes so far instead.
-    const done = pct === null && p.bytes > 0 ? `${formatBytes(p.bytes)} so far` : undefined;
+    const done = pct === null && p.bytes > 0 ? t('{size} so far', { size: formatBytes(p.bytes) }) : undefined;
     // A stage that has started means the ones before it are done.
     setRun((cur) => cur && { ...cur, stages: cur.stages.map((s) => (s.id === id ? { ...s, percent: pct, done }
       : s.id === 'download' && id !== 'download' ? { ...s, percent: 100 } : s)) });
   });
 
   const startSave = async () => {
-    const t = saveTarget;
-    if (!t || !api.saveImage || (!local && !image)) return;
+    const tgt = saveTarget;
+    if (!tgt || !api.saveImage || (!local && !image)) return;
     const name = local ? local.name : image!.file;
     const what: SaveSubject = local ? { localToken: local.token } : { imageId: image!.id };
     setRun({
-      kind: 'file', log: [], result: null, saved: t.token,
+      kind: 'file', log: [], result: null, saved: tgt.token,
       stages: [
-        ...(custom ? [] : [{ id: 'download', percent: 0, label: local ? 'Check the file against the release' : 'Download and check' }]),
-        { id: 'write', percent: 0, label: `${uncompressedName(name) === name ? 'Save' : 'Decompress and save'} ${fileName(t.path)}`
-          + (custom ? '' : ', and compare with the release') },
+        ...(custom ? [] : [{ id: 'download', percent: 0, label: local ? t('Check the file against the release') : t('Download and check') }]),
+        { id: 'write', percent: 0, label: t(uncompressedName(name) === name ? 'Save {file}' : 'Decompress and save {file}', { file: fileName(tgt.path) })
+          + (custom ? '' : t(', and compare with the release')) },
       ],
     });
     const off = followProgress();
     // As in startSd: never leave a run without a result.
     let res: Awaited<ReturnType<NonNullable<typeof api.saveImage>>>;
     try {
-      res = await api.saveImage(what, t.token);
+      res = await api.saveImage(what, tgt.token);
     } catch (e) {
       res = { ok: false, reason: 'The save stopped with an error.', detail: String((e as Error)?.message ?? e) };
     } finally {
@@ -1406,10 +1523,10 @@ export function App() {
       stages: res.ok ? cur.stages.map((s) => ({ ...s, percent: 100, done: undefined })) : cur.stages,
       result: res.ok
         // The SHA-256 on a line of its own, in the detail style: a path and a hash in one sentence wrap badly.
-        ? { ok: true, title: custom ? 'Saved' : 'Saved and checked', detail: `SHA-256 ${res.sha256}`, text: custom
-          ? `${t.path} holds ${name}, decompressed. The file is not a Roxora release image and was not checked against one.`
-          : `${t.path} holds ${name}, decompressed. It matches the release.` }
-        : { ok: false, title: res.reason, text: /Nothing was saved/.test(res.reason) ? '' : 'Nothing was saved under that name.',
+        ? { ok: true, title: custom ? t('Saved') : t('Saved and checked'), detail: `SHA-256 ${res.sha256}`, text: custom
+          ? t('{path} holds {name}, decompressed. The file is not a Roxora release image and was not checked against one.', { path: tgt.path, name })
+          : t('{path} holds {name}, decompressed. It matches the release.', { path: tgt.path, name }) }
+        : { ok: false, title: msg(res.reason), text: /Nothing was saved/.test(res.reason) ? '' : t('Nothing was saved under that name.'),
           ...(res.detail ? { detail: res.detail } : {}) },
     });
   };
@@ -1420,10 +1537,10 @@ export function App() {
     const r: Run = {
       kind: 'sd', log: [], result: null,
       stages: [
-        { id: 'download', percent: 0, label: custom ? 'Read the image and take its SHA-256'
-          : local ? 'Check the file against the release' : 'Download and check' },
-        { id: 'write', label: `Write ${target.device}`, percent: 0 },
-        { id: 'verify', label: custom ? 'Read back and compare with the image' : 'Read back and compare with the release', percent: 0 },
+        { id: 'download', percent: 0, label: custom ? t('Read the image and take its SHA-256')
+          : local ? t('Check the file against the release') : t('Download and check') },
+        { id: 'write', label: t('Write {device}', { device: target.device }), percent: 0 },
+        { id: 'verify', label: custom ? t('Read back and compare with the image') : t('Read back and compare with the release'), percent: 0 },
       ],
     };
     setRun(r);
@@ -1443,10 +1560,10 @@ export function App() {
     setRun((cur) => cur && {
       ...cur,
       result: res.ok
-        ? { ok: true, title: 'Written and verified', text: custom
-          ? `${target.description} holds ${name}. The read-back matches the image file (SHA-256 ${res.sha256}). The file is not a Roxora release image and was not checked against one. You can remove the drive.`
-          : `${target.description} holds ${name}. The read-back matches the release (SHA-256 ${res.sha256}). You can remove the drive.` }
-        : { ok: false, title: res.reason, text: /Nothing was written/.test(res.reason) ? '' : 'The drive may be partly written.', ...(res.detail ? { detail: res.detail } : {}) },
+        ? { ok: true, title: t('Written and verified'), text: custom
+          ? t('{drive} holds {name}. The read-back matches the image file (SHA-256 {sha}). The file is not a Roxora release image and was not checked against one. You can remove the drive.', { drive: target.description, name, sha: res.sha256 })
+          : t('{drive} holds {name}. The read-back matches the release (SHA-256 {sha}). You can remove the drive.', { drive: target.description, name, sha: res.sha256 }) }
+        : { ok: false, title: msg(res.reason), text: /Nothing was written/.test(res.reason) ? '' : t('The drive may be partly written.'), ...(res.detail ? { detail: res.detail } : {}) },
     });
   };
 
@@ -1456,10 +1573,10 @@ export function App() {
     const r: Run = {
       kind: 'maskrom', log: [], result: null,
       stages: [
-        { id: 'prepare', label: source === 'release' ? 'Download, check and decompress' : source === 'spi' ? 'Download and check' : 'Prepare the file', percent: 0 },
-        { id: 'loader', label: 'Send the loader and wait for the board', percent: null },
-        { id: 'write', label: `Write ${st.label}`, percent: 0 },
-        { id: 'verify', label: 'Read back and compare', percent: 0 },
+        { id: 'prepare', label: source === 'release' ? t('Download, check and decompress') : source === 'spi' ? t('Download and check') : source === 'update' ? t('Read the update.img') : t('Prepare the file'), percent: 0 },
+        { id: 'loader', label: t('Send the loader and wait for the board'), percent: null },
+        { id: 'write', label: source === 'update' ? t('Write the partition table, the loader and the partitions to the {storage}', { storage: t(st.label) }) : t('Write {device}', { device: t(st.label) }), percent: 0 },
+        { id: 'verify', label: t('Read back and compare'), percent: 0 },
       ],
     };
     setRun(r);
@@ -1467,22 +1584,22 @@ export function App() {
       setRun((cur) => cur && { ...cur, stages: cur.stages.map((s) => (s.id === id ? { ...s, ...patch } : s)) });
     const finish = (result: Run['result']) => setRun((cur) => cur && { ...cur, result });
 
-    let prepared = source === 'file' ? file : WEB ? releaseFile : null;
+    let prepared: PreparedFile | null = source === 'file' ? file : source === 'update' ? updateFile : WEB ? releaseFile : null;
     if (!WEB && (source === 'release' || source === 'spi') && image) {
       const off = api.onProgress((p) => setStage('prepare', { percent: p.total ? Math.min(100, Math.floor(p.bytes * 100 / p.total)) : null, detail: p.stage }));
       const res = await api.prepareMaskrom(image.id, source === 'spi' ? 'spi' : 'image');
       off();
-      if ('error' in res) { finish({ ok: false, title: res.error, text: 'Nothing was written.' }); return; }
+      if ('error' in res) { finish({ ok: false, title: msg(res.error), text: t('Nothing was written.') }); return; }
       prepared = res;
     }
     if (!prepared) return;
     setStage('prepare', { percent: 100, detail: undefined });
     // Rockchip's loader is not shipped: built from rkbin on first use.
-    setStage('loader', { percent: null, detail: "getting Rockchip's loader" });
+    setStage('loader', { percent: null, detail: t("getting Rockchip's loader") });
     const loader = await api.getLoader(mb.loader);
     if ('error' in loader) {
-      if (source !== 'file') api.releaseMaskrom(prepared.token);
-      finish({ ok: false, title: loader.error, text: 'Nothing was written.' });
+      if (source !== 'file' && source !== 'update') api.releaseMaskrom(prepared.token);
+      finish({ ok: false, title: msg(loader.error), text: t('Nothing was written.') });
       return;
     }
     setStage('loader', { percent: null, detail: undefined });
@@ -1491,10 +1608,12 @@ export function App() {
       loaderUrl: loader.url, size: prepared.size, sha256: prepared.sha256,
       ...(prepared.file ? { file: prepared.file, reconnectTimeout: 180000 } : { fileUrl: prepared.url }),
       storageCode: st.code, storageLabel: st.label, verify: true, resetAfter: settingsNow.resetAfterMaskrom,
+      ...(source === 'update' ? { updateImage: true } : {}),
+      ...(clearGpt && (source === 'release' || source === 'file') && (storage === 'emmc' || storage === 'sd') ? { clearBackupGpt: true } : {}),
     }, {
       log: (line) => setRun((cur) => cur && { ...cur, log: [...cur.log, line] }),
       stage: (s: Stage) => {
-        if (s === 'loader' || s === 'reconnect') setStage('loader', { percent: null, detail: s === 'reconnect' ? 'waiting for the board' : undefined });
+        if (s === 'loader' || s === 'reconnect') setStage('loader', { percent: null, detail: s === 'reconnect' ? t('waiting for the board') : undefined });
         // A browser forgets the board when it restarts in Loader mode; it has
         // to be chosen again (the desktop app finds it by itself).
         if (s === 'reconnect' && WEB) setReconnect(true);
@@ -1512,17 +1631,29 @@ export function App() {
     }
     maskromJob.current = null;
     setReconnect(false);
-    if (source !== 'file') api.releaseMaskrom(prepared.token);
-    const restarting = settingsNow.resetAfterMaskrom ? ' The board is restarting.' : '';
+    if (source !== 'file' && source !== 'update') api.releaseMaskrom(prepared.token);
+    const restarting = settingsNow.resetAfterMaskrom ? t(' The board is restarting.') : '';
     const mib = (n: number) => `${Math.floor(n / 1048576)} MiB`;
+    if ('checks' in res) {
+      const c = res.checks;
+      const past = c.matched + c.filler + c.unsure;
+      finish({ ok: true, warning: c.unsure > 0, title: t('Written'),
+        text: t('{name} is on the {storage}: the partition table, the loader and {size} of partitions.', { name: prepared.name, storage: t(st.label), size: formatBytes(res.written) })
+          + t(' Everything written in the first 32 MiB read back as written ({size}).', { size: formatBytes(c.headBytes) })
+          + (past ? t(" Of {n} samples further on, {matched} matched, {filler} came back as the loader's filler and {unsure} differently; past 32 MiB this loader's reads are not trustworthy, so those say nothing about the write.", { n: past, matched: c.matched, filler: c.filler, unsure: c.unsure }) : '')
+          + restarting });
+      return;
+    }
+    const gpt = 'clearedBackupGpt' in res && res.clearedBackupGpt ? t(' The old backup partition table at the end was cleared.') : '';
+    const where = { name: prepared.name, storage: t(st.label) };
     finish(!res.ok
-      ? { ok: false, title: res.reason, text: 'Check the connection and the output below.', ...(res.detail ? { detail: res.detail } : {}) }
+      ? { ok: false, title: msg(res.reason), text: t('Check the connection and the output below.'), ...(res.detail ? { detail: res.detail } : {}) }
       : res.verified === 'match'
-        ? { ok: true, title: 'Written and verified', text: `${prepared.name} is on the ${st.label}. The read-back matches (SHA-256 ${res.sha256}).${restarting}` }
+        ? { ok: true, title: t('Written and verified'), text: t('{name} is on the {storage}. The read-back matches (SHA-256 {sha}).', { ...where, sha: res.sha256 }) + gpt + restarting }
         : res.verified === 'partial'
-          ? { ok: true, warning: true, title: `Written; the first ${mib(res.verifiedBytes)} verified`,
-            text: `${prepared.name} is on the ${st.label}. The first ${mib(res.verifiedBytes)} read back as written. Past that, this board's loader returns filler when the ${st.label} is read over USB, so the rest could not be checked; the write itself went through. Booting the board from it shows it works.${restarting}` }
-          : { ok: true, warning: true, title: 'Written, not verified', text: `${prepared.name} is on the ${st.label}. There was no checksum to compare it with, so it was not read back.${restarting}` });
+          ? { ok: true, warning: true, title: t('Written; the first {size} verified', { size: mib(res.verifiedBytes) }),
+            text: t("{name} is on the {storage}. The first {size} read back as written. Past that, this board's loader returns filler when the {storage} is read over USB, so the rest could not be checked; the write itself went through. Booting the board from it shows it works.", { ...where, size: mib(res.verifiedBytes) }) + gpt + restarting }
+          : { ok: true, warning: true, title: t('Written, not verified'), text: t('{name} is on the {storage}. There was no checksum to compare it with, so it was not read back.', where) + gpt + restarting });
   };
 
   // A save erases nothing, so it needs no second question.
@@ -1533,7 +1664,7 @@ export function App() {
     if (WEB) {
       // WebUSB only shows devices the user picked; this click is the gesture.
       navigator.usb.requestDevice({ filters: [{ vendorId: 0x2207 }] })
-        .then(() => startMaskromWrite(), () => setFileError('No board was chosen. Connect it in Maskrom mode and try again.'));
+        .then(() => startMaskromWrite(), () => setFileError(t('No board was chosen. Connect it in Maskrom mode and try again.')));
       return;
     }
     startMaskromWrite();
@@ -1548,16 +1679,15 @@ export function App() {
   // Notices about the whole app sit under the first step's title. The ones
   // that stop a write (sample data, no WebUSB) show again on the review.
   const noUsb = WEB && !('usb' in navigator) && (
-    <Alert isInline variant="warning" title="This browser cannot reach USB devices">
-      Writing over USB needs WebUSB, which Chrome, Edge and other Chromium browsers have. Or use
-      the <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">desktop app</Button>.
+    <Alert isInline variant="warning" title={t('This browser cannot reach USB devices')}>
+      {t('Writing over USB needs WebUSB, which Chrome, Edge and other Chromium browsers have. Or use the')}{' '}
+      <Button variant="link" isInline component="a" href={DESKTOP_URL} target="_blank">{t('desktop app')}</Button>{t('.')}
     </Alert>
   );
   const sampleNote = sample && (
-    <Alert isInline variant="warning" title="Sample data"
-      actionLinks={<Button variant="link" isInline onClick={() => setUseSample(false)}>Load the real releases</Button>}>
-      These entries come from the sample catalog in the release contract. The releases do not exist and nothing
-      can be written.
+    <Alert isInline variant="warning" title={t('Sample data')}
+      actionLinks={<Button variant="link" isInline onClick={() => setUseSample(false)}>{t('Load the real releases')}</Button>}>
+      {t('These entries come from the sample catalog in the release contract. The releases do not exist and nothing can be written.')}
     </Alert>
   );
   const notices = (
@@ -1572,13 +1702,13 @@ export function App() {
     <Shell onSettings={() => setSettings(true)}>
       {/* A newer version: above the wizard, never during a write. */}
       {!run && offer && dismissed !== offer.version && (
-        <PageSection aria-label="Update" className="update-notice">
-          <Alert isInline variant="info" title={`Roxora Imager ${offer.version}${offer.beta ? ' (beta)' : ''} is available`}
+        <PageSection aria-label={t('Update')} className="update-notice">
+          <Alert isInline variant="info" title={t('Roxora Imager {version} is available', { version: offerName(offer) })}
             actionClose={<AlertActionCloseButton onClose={() => dismissUpdate(offer.version)} />}
             actionLinks={(
               <>
-                <AlertActionLink onClick={() => setUpdating(true)}>Update</AlertActionLink>
-                <AlertActionLink component="a" href={offer.url} target="_blank">Release notes</AlertActionLink>
+                <AlertActionLink onClick={() => setUpdating(true)}>{t('Update')}</AlertActionLink>
+                <AlertActionLink component="a" href={offer.url} target="_blank">{t('Release notes')}</AlertActionLink>
               </>
             )}>
             {offer.notes}
@@ -1586,74 +1716,82 @@ export function App() {
         </PageSection>
       )}
       {run ? <RunView run={run} onCancel={cancel} onDone={finishRun} reconnect={reconnect} /> : (
-        <PageSection type="wizard" isFilled hasBodyWrapper={false} aria-label="Write an image">
-          <Wizard navAriaLabel="Steps" isVisitRequired header={<Jump to={jump} done={() => setJump(null)} />} onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
-            <WizardStep name="Board" id="board" footer={{ isNextDisabled: !board && !local, isCancelHidden: true }}>
+        <PageSection type="wizard" isFilled hasBodyWrapper={false} aria-label={t('Write an image')}>
+          <Wizard navAriaLabel={t('Steps')} isVisitRequired header={<Jump to={jump} done={() => setJump(null)} />} onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
+            <WizardStep name={t('Board')} id="board" footer={{ isNextDisabled: !board && !local, isCancelHidden: true, nextButtonText: t('Next'), backButtonText: t('Back') }}>
               {/* Choosing a board means choosing among its release images: a custom file goes. */}
               <BoardStep catalog={catalog} boards={boards} board={board} reload={load}
                 setBoard={(b) => { if (b !== board) setLocal(null); chooseBoard(b); }}
                 find={{ query, setQuery, vendor, setVendor }} notices={notices} lp={lp} />
             </WizardStep>
-            <WizardStep name="Image" id="image" isDisabled={!board && !local} footer={{ isNextDisabled: !imageId && !local, isCancelHidden: true }}>
+            <WizardStep name={t('Image')} id="image" isDisabled={!board && !local} footer={{ isNextDisabled: !imageId && !local, isCancelHidden: true, nextButtonText: t('Next'), backButtonText: t('Back') }}>
               <ImageStep board={cur} imageId={imageId} setImage={(id) => { setLocal(null); setImageId(id); }} lp={lp} />
             </WizardStep>
-            <WizardStep name="Destination" id="dest" isDisabled={!imageId && !local} footer={{ isNextDisabled: !destReady, isCancelHidden: true, nextButtonText: 'Review' }}>
+            <WizardStep name={t('Destination')} id="dest" isDisabled={!imageId && !local} footer={{ isNextDisabled: !destReady, isCancelHidden: true, nextButtonText: t('Review'), backButtonText: t('Back') }}>
               <DestinationStep boardName={cur?.boardName ?? ''} boardId={board ?? ''} image={image}
                 method={method} setMethod={(m) => { setMethod(m); if (m === 'sd') refreshDrives(); }}
                 drives={drives} refreshDrives={refreshDrives} device={device} setDevice={chooseDevice}
                 showInternal={internalSwitch ? showInternal : null} setShowInternal={toggleInternal}
                 storage={storage} setStorage={(s) => { setStorage(s); setSource(mb?.wholeImage.includes(s) ? 'release' : s === 'spinor' && image?.spi ? 'spi' : 'file'); }}
                 source={source} setSource={setSource} file={file} pickFile={pickFile} picking={picking} fileError={fileError}
+                updateFile={updateFile} pickUpdate={pickUpdate} clearGpt={clearGpt} setClearGpt={setClearGpt}
                 releaseFile={releaseFile} pickRelease={pickRelease} checking={checking}
                 downloadRelease={downloadRelease} proxyError={proxyError} custom={custom} spiProblem={spiProblem}
                 saveTarget={saveTarget} pickSave={pickSave} savePicking={savePicking} saveError={saveError ?? saveShort} />
             </WizardStep>
-            <WizardStep name="Review" id="review" isDisabled={!destReady}
+            <WizardStep name={t('Review')} id="review" isDisabled={!destReady}
               footer={<ReviewFooter canWrite={!why} why={why} onWrite={onWrite} save={method === 'file'} />}>
-              <StepPage title="Review" notices={writeNotices}
-                lead={`Nothing has been ${method === 'file' ? 'saved' : 'written'} yet. Check this before you go on.`}>
-                {erasedWhat && <Alert isInline variant="danger" title={`Everything on ${erasedWhat} will be erased.`} />}
+              <StepPage title={t('Review')} notices={writeNotices}
+                lead={t(method === 'file' ? 'Nothing has been saved yet. Check this before you go on.' : 'Nothing has been written yet. Check this before you go on.')}>
+                {erasedWhat && <Alert isInline variant="danger" title={t('Everything on {what} will be erased.', { what: erasedWhat })} />}
               <DescriptionList isHorizontal>
-                {!custom && <DescriptionListGroup><DescriptionListTerm>Board</DescriptionListTerm><DescriptionListDescription>{cur?.boardName}</DescriptionListDescription></DescriptionListGroup>}
+                {!custom && <DescriptionListGroup><DescriptionListTerm>{t('Board')}</DescriptionListTerm><DescriptionListDescription>{cur?.boardName}</DescriptionListDescription></DescriptionListGroup>}
                 {custom && local && (
                   <>
-                    <DescriptionListGroup><DescriptionListTerm>Image</DescriptionListTerm><DescriptionListDescription>{local.name}, {formatBytes(local.size)}, a file on this computer</DescriptionListDescription></DescriptionListGroup>
-                    <DescriptionListGroup><DescriptionListTerm>Release</DescriptionListTerm><DescriptionListDescription>Not a Roxora release image. It was not checked against one.</DescriptionListDescription></DescriptionListGroup>
+                    <DescriptionListGroup><DescriptionListTerm>{t('Image')}</DescriptionListTerm><DescriptionListDescription>{t('{name}, {size}, a file on this computer', { name: local.name, size: formatBytes(local.size) })}</DescriptionListDescription></DescriptionListGroup>
+                    <DescriptionListGroup><DescriptionListTerm>{t('Release')}</DescriptionListTerm><DescriptionListDescription>{t('Not a Roxora release image. It was not checked against one.')}</DescriptionListDescription></DescriptionListGroup>
                   </>
                 )}
                 {!custom && (method !== 'maskrom' || source === 'release') && image && (
                   <>
-                    <DescriptionListGroup><DescriptionListTerm>Image</DescriptionListTerm><DescriptionListDescription>{image.file}</DescriptionListDescription></DescriptionListGroup>
-                    <DescriptionListGroup><DescriptionListTerm>Release</DescriptionListTerm><DescriptionListDescription>{releaseWords(image)}, {image.releaseInfo.date}</DescriptionListDescription></DescriptionListGroup>
+                    <DescriptionListGroup><DescriptionListTerm>{t('Image')}</DescriptionListTerm><DescriptionListDescription>{image.file}</DescriptionListDescription></DescriptionListGroup>
+                    <DescriptionListGroup><DescriptionListTerm>{t('Release')}</DescriptionListTerm><DescriptionListDescription>{releaseWords(image)}, {image.releaseInfo.date}</DescriptionListDescription></DescriptionListGroup>
                   </>
                 )}
                 {method !== 'maskrom' && local?.imageId && (
-                  <DescriptionListGroup><DescriptionListTerm>File</DescriptionListTerm><DescriptionListDescription>{local.name} on this computer; its SHA-256 matches the release</DescriptionListDescription></DescriptionListGroup>
+                  <DescriptionListGroup><DescriptionListTerm>{t('File')}</DescriptionListTerm><DescriptionListDescription>{t('{name} on this computer; its SHA-256 matches the release', { name: local.name })}</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {method === 'maskrom' && source === 'spi' && image?.spi && (
-                  <DescriptionListGroup><DescriptionListTerm>SPI bootloader</DescriptionListTerm><DescriptionListDescription>{image.spi.file}, {formatBytes(image.spi.size)}, from {releaseWords(image).toLowerCase()}</DescriptionListDescription></DescriptionListGroup>
+                  <DescriptionListGroup><DescriptionListTerm>{t('SPI bootloader')}</DescriptionListTerm><DescriptionListDescription>{t('{file}, {size}, from {release}', { file: image.spi.file, size: formatBytes(image.spi.size), release: releaseWords(image) })}</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {WEB && source !== 'file' && releaseFile && (
-                  <DescriptionListGroup><DescriptionListTerm>Release file</DescriptionListTerm><DescriptionListDescription>{releaseFile.name}, matches the release SHA-256</DescriptionListDescription></DescriptionListGroup>
+                  <DescriptionListGroup><DescriptionListTerm>{t('Release file')}</DescriptionListTerm><DescriptionListDescription>{t('{name}, matches the release SHA-256', { name: releaseFile.name })}</DescriptionListDescription></DescriptionListGroup>
+                )}
+                {method === 'maskrom' && source === 'update' && updateFile && (
+                  <DescriptionListGroup><DescriptionListTerm>update.img</DescriptionListTerm><DescriptionListDescription>{updateFile.name}, {formatBytes(updateFile.size)}: {updateWords(updateFile)}</DescriptionListDescription></DescriptionListGroup>
+                )}
+                {method === 'maskrom' && clearGpt && (source === 'release' || source === 'file') && (storage === 'emmc' || storage === 'sd') && (
+                  <DescriptionListGroup><DescriptionListTerm>{t('Also')}</DescriptionListTerm><DescriptionListDescription>{t('The old backup partition table at the end of the storage is cleared after the image.')}</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {method === 'maskrom' && source === 'file' && file && (
-                  <DescriptionListGroup><DescriptionListTerm>File</DescriptionListTerm><DescriptionListDescription>{file.name}, {formatBytes(file.size)}</DescriptionListDescription></DescriptionListGroup>
+                  <DescriptionListGroup><DescriptionListTerm>{t('File')}</DescriptionListTerm><DescriptionListDescription>{file.name}, {formatBytes(file.size)}</DescriptionListDescription></DescriptionListGroup>
                 )}
-                <DescriptionListGroup><DescriptionListTerm>Destination</DescriptionListTerm><DescriptionListDescription>
+                <DescriptionListGroup><DescriptionListTerm>{t('Destination')}</DescriptionListTerm><DescriptionListDescription>
                   {method === 'sd' ? (target ? `${target.description}, ${target.device}, ${formatBytes(target.size)}` : '')
                     : method === 'file' ? (saveTarget ? `${saveTarget.path}${saveNeed ? `, ${formatBytes(saveNeed)}` : ''}` : '')
-                    : (storage ? `${STORAGES[storage].label} of the board, over USB in Maskrom mode` : '')}
+                    : (storage ? t('{storage} of the board, over USB in Maskrom mode', { storage: t(STORAGES[storage].label) }) : '')}
                 </DescriptionListDescription></DescriptionListGroup>
                 {method === 'file' && (
-                  <DescriptionListGroup><DescriptionListTerm>Boots</DescriptionListTerm><DescriptionListDescription>{bootNote(image, custom)}</DescriptionListDescription></DescriptionListGroup>
+                  <DescriptionListGroup><DescriptionListTerm>{t('Boots')}</DescriptionListTerm><DescriptionListDescription>{bootNote(image, custom)}</DescriptionListDescription></DescriptionListGroup>
                 )}
-                <DescriptionListGroup><DescriptionListTerm>Checks</DescriptionListTerm><DescriptionListDescription>
+                <DescriptionListGroup><DescriptionListTerm>{t('Checks')}</DescriptionListTerm><DescriptionListDescription>
                   {method === 'file' ? saveChecks
-                    : custom ? 'The image is read once to take its SHA-256. After writing, the drive is read back and compared with it. Nothing is compared with a Roxora release.'
-                    : method === 'sd' && local ? 'The file is checked against the release SHA-256 again. After writing, the drive is read back and compared with the release SHA-256.'
+                    : custom ? t('The image is read once to take its SHA-256. After writing, the drive is read back and compared with it. Nothing is compared with a Roxora release.')
+                    : method === 'sd' && local ? t('The file is checked against the release SHA-256 again. After writing, the drive is read back and compared with the release SHA-256.')
+                    : method === 'maskrom' && source === 'update' ? t("The MD5 inside the update.img was checked when it was chosen. After writing, everything written in the first 32 MiB of the eMMC is read back and compared; past that, samples of each partition are compared, and one that differs is reported, not taken as a failed write (this loader's reads past 32 MiB are not trustworthy).")
                     : method === 'sd' || source === 'release' || source === 'spi'
-                    ? 'The download is checked against the release SHA-256. After writing, the destination is read back and compared with the release SHA-256.'
-                    : 'After writing, the storage is read back and compared with the file.'}
+                    ? t('The download is checked against the release SHA-256. After writing, the destination is read back and compared with the release SHA-256.')
+                    : t('After writing, the storage is read back and compared with the file.')}
                 </DescriptionListDescription></DescriptionListGroup>
               </DescriptionList>
               </StepPage>
@@ -1663,40 +1801,40 @@ export function App() {
       )}
 
       <Modal isOpen={!!askInternal} onClose={() => setAskInternal(null)} variant="small" aria-labelledby="internal-title">
-        <ModalHeader title="Use a built-in disk?" labelId="internal-title" titleIconVariant="warning" />
+        <ModalHeader title={t('Use a built-in disk?')} labelId="internal-title" titleIconVariant="warning" />
         {askInternal && askInternal.internal && (
           <ModalBody>
-            {askInternal.device} is the built-in {INTERNAL_WORDS[askInternal.internal]} of this computer
-            ({askInternal.description ? `${askInternal.description}, ` : ''}{formatBytes(askInternal.size)}). Nothing on it is
-            mounted now, but it may hold a system or data you need. Writing the image erases all of it.
+            {t('{device} is the built-in {kind} of this computer ({what}). Nothing on it is mounted now, but it may hold a system or data you need. Writing the image erases all of it.', {
+              device: askInternal.device, kind: t(INTERNAL_WORDS[askInternal.internal]),
+              what: `${askInternal.description ? `${askInternal.description}, ` : ''}${formatBytes(askInternal.size)}` })}
           </ModalBody>
         )}
         <ModalFooter>
           <Button variant="danger" onClick={() => { if (askInternal) setDevice(askInternal.device); setAskInternal(null); }}>
-            Use {askInternal?.device ?? 'this disk'}
+            {askInternal ? t('Use {device}', { device: askInternal.device }) : t('Use this disk')}
           </Button>
-          <Button variant="link" onClick={() => setAskInternal(null)}>Cancel</Button>
+          <Button variant="link" onClick={() => setAskInternal(null)}>{t('Cancel')}</Button>
         </ModalFooter>
       </Modal>
 
       <Modal isOpen={confirm} onClose={() => setConfirm(false)} variant="small" aria-labelledby="confirm-title">
-        <ModalHeader title="Erase and write?" labelId="confirm-title" titleIconVariant="warning" />
-        <ModalBody>{erased} This cannot be undone.</ModalBody>
+        <ModalHeader title={t('Erase and write?')} labelId="confirm-title" titleIconVariant="warning" />
+        <ModalBody>{erased} {t('This cannot be undone.')}</ModalBody>
         <ModalFooter>
-          <Button variant="danger" onClick={doWrite}>Erase and write</Button>
-          <Button variant="link" onClick={() => setConfirm(false)}>Cancel</Button>
+          <Button variant="danger" onClick={doWrite}>{t('Erase and write')}</Button>
+          <Button variant="link" onClick={() => setConfirm(false)}>{t('Cancel')}</Button>
         </ModalFooter>
       </Modal>
 
       <Modal isOpen={!!usbChoices} onClose={() => { api.answerUsbChoice(''); setUsbChoices(null); }} variant="small" aria-labelledby="usb-title">
-        <ModalHeader title="Several Rockchip devices are connected" labelId="usb-title" />
+        <ModalHeader title={t('Several Rockchip devices are connected')} labelId="usb-title" />
         <ModalBody>
           <Stack hasGutter>
-            <Content component="p">Choose the board to write, or disconnect the others.</Content>
+            <Content component="p">{t('Choose the board to write, or disconnect the others.')}</Content>
             {usbChoices?.map((c) => (
               <StackItem key={c.deviceId}>
                 <Button variant="secondary" onClick={() => { api.answerUsbChoice(c.deviceId); setUsbChoices(null); }}>
-                  {c.productName || 'Rockchip device'} (product 0x{c.productId.toString(16)})
+                  {c.productName || t('Rockchip device')} ({t('product')} 0x{c.productId.toString(16)})
                 </Button>
               </StackItem>
             ))}

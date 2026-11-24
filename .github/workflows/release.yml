@@ -5,10 +5,18 @@ name: Release
 # release on a version tag. The layout follows gahingwoo/RKDevelopTool-GUI's release.yml:
 # unsigned unless signing secrets exist, the scarce Intel macOS runner never
 # blocks the release, and the notes come from CHANGELOG.md.
+# Every push to main also builds everything and replaces the rolling "ci"
+# release (a pre-release): the app's CI update tier.
 on:
   push:
     tags: ["v[0-9]*"]
+    branches: [main]
   workflow_dispatch:
+
+# Two pushes to main in a row: the older build is not worth finishing.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref == 'refs/heads/main' }}
 
 permissions:
   contents: write
@@ -397,3 +405,78 @@ jobs:
           files: out/*
           body_path: release-notes.md
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+  ci-release:
+    name: Rolling "ci" release (untested build of main)
+    needs: [linux, linux-arm64-noble, macos, windows]
+    # Linux and Windows must have built; a macOS runner that never came (they
+    # are scarce) leaves the macOS files out rather than the whole release.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && !cancelled() && needs.linux.result == 'success' && needs.windows.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - name: Files and checksums
+        run: |
+          mkdir out
+          find artifacts -path artifacts/rkdeveloptool-wasm -prune -o -type f -exec cp {} out/ \;
+          # Version-less copies of the DMGs: the roxora-imager@nightly cask's URL stays the same.
+          for a in arm64 x86_64; do
+            f=$(ls out/roxora-imager-*-macos-$a.dmg 2>/dev/null | head -1 || true)
+            if [ -n "$f" ]; then cp "$f" "out/roxora-imager-macos-$a.dmg"; fi
+          done
+          (cd out && sha256sum -- * > SHA256SUMS)
+          cat out/SHA256SUMS
+      - name: Replace the ci release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha=${GITHUB_SHA::7}
+          date=$(date -u +%Y-%m-%d)
+          printf '%s\n' "Built from ${GITHUB_SHA} on ${date} by the Release workflow on main." "" \
+            "Untested: nothing here has been run on a board or a test machine. Every successful build of main replaces this release." > notes.md
+          gh release delete ci --yes --cleanup-tag -R "$GITHUB_REPOSITORY" || true
+          gh release create ci out/* -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
+            --title "CI build ${sha} ${date}" --notes-file notes.md
+
+  homebrew-tap:
+    name: Pull request to gahingwoo/homebrew-tap
+    needs: release
+    # Normal releases only: a pre-release has no cask (scripts/bump-cask.mjs).
+    if: startsWith(github.ref, 'refs/tags/') && !contains(github.ref_name, '-') && needs.release.result == 'success'
+    runs-on: ubuntu-24.04
+    env:
+      # A fine-grained token with Contents and Pull requests read and write
+      # on gahingwoo/homebrew-tap only (docs/release.md). Without it this
+      # job does nothing.
+      TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        if: env.TAP_TOKEN != ''
+      - uses: actions/setup-node@v4
+        if: env.TAP_TOKEN != ''
+        with:
+          node-version: 22
+      - name: Write the cask and open the pull request
+        if: env.TAP_TOKEN != ''
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          # The release's asset digests, read with this repository's token.
+          GITHUB_API_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/gahingwoo/homebrew-tap.git" tap
+          file=$(GH_TOKEN="$GITHUB_API_TOKEN" node scripts/bump-cask.mjs "$GITHUB_REF_NAME" tap/Casks)
+          cask=$(basename "$file" .rb)
+          cd tap
+          if [ -z "$(git status --porcelain)" ]; then echo "$cask is already at ${GITHUB_REF_NAME#v}"; exit 0; fi
+          git checkout -b "$cask-$GITHUB_REF_NAME"
+          git add Casks
+          git -c user.name=gahingwoo -c user.email=gahing@gahingwoo.com commit -s -m "$cask ${GITHUB_REF_NAME#v}"
+          git push origin "$cask-$GITHUB_REF_NAME"
+          gh pr create -R gahingwoo/homebrew-tap --head "$cask-$GITHUB_REF_NAME" --base main \
+            --title "$cask ${GITHUB_REF_NAME#v}" --body "Written by roxora-os/imager's release workflow for $GITHUB_REF_NAME (scripts/bump-cask.mjs)."
+      - name: No tap token
+        if: env.TAP_TOKEN == ''
+        run: echo "HOMEBREW_TAP_TOKEN is not set; the cask is not updated (docs/release.md)."

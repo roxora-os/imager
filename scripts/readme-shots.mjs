@@ -19,7 +19,7 @@ async function openWithReleases(theme) {
     try {
       const page = await app.firstWindow();
       await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1100, 760));
-      await page.evaluate((t) => { localStorage.setItem('theme', t); }, theme);
+      await page.evaluate((t) => { localStorage.setItem('theme', t); localStorage.setItem('lang', 'en'); }, theme);
       await page.reload();
       await page.waitForSelector('h2:has-text("Board")');
       // The real releases: wait until a board from them is listed.

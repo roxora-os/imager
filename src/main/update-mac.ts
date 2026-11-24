@@ -49,8 +49,9 @@ export async function findBrew(exists: (p: string) => boolean = existsSync, runn
  * The two commands of an update: refresh the taps (without it brew does not
  * know the new version), then upgrade the cask.
  */
-export function brewSteps(brew: string): { update: string[]; upgrade: string[] } {
-  return { update: [brew, 'update', '--quiet'], upgrade: [brew, 'upgrade', '--cask', BREW_CASK] };
+export function brewSteps(brew: string, cask = BREW_CASK): { update: string[]; upgrade: string[] } {
+  // A nightly cask is version :latest: brew upgrades it only when asked to be greedy.
+  return { update: [brew, 'update', '--quiet'], upgrade: [brew, 'upgrade', '--cask', ...(cask.endsWith('@nightly') ? ['--greedy'] : []), cask] };
 }
 
 /** brew's environment: its own folder on the PATH, the user's cleanup setting not overridden. */
@@ -71,6 +72,8 @@ export type BrewOutcome =
 
 export interface BrewUpgrade {
   brew: string;
+  /** The tap's cask this copy came from (roxora-imager or roxora-imager@nightly). */
+  cask?: string;
   run?: Run;
   /** The version of the app bundle on disk, to see that it really changed. */
   installedVersion: () => Promise<string | null>;
@@ -85,7 +88,7 @@ export interface BrewUpgrade {
 /** Run Homebrew as the user. Nothing here needs or asks for root. */
 export async function brewUpgrade(o: BrewUpgrade): Promise<BrewOutcome> {
   const runner = o.run ?? run;
-  const steps = brewSteps(o.brew);
+  const steps = brewSteps(o.brew, o.cask);
   const env = brewEnv(o.brew, o.env);
   const say = (argv: string[]) => o.onLog(`$ brew ${argv.slice(1).join(' ')}\n`);
   o.onStage('update');
@@ -98,7 +101,8 @@ export async function brewUpgrade(o: BrewUpgrade): Promise<BrewOutcome> {
   const g = await runner(steps.upgrade[0], steps.upgrade.slice(1), { env, onOutput: o.onLog });
   if (g.code !== 0) return { ok: false, reason: `"brew upgrade" failed (${g.code === null ? 'it could not be started' : `exit status ${g.code}`}).` };
   const now = await o.installedVersion();
-  if (now !== null && now === o.runningVersion) {
+  // A nightly build keeps the version of the code it was built from: only the commit tells them apart.
+  if (now !== null && now === o.runningVersion && !o.cask?.endsWith('@nightly')) {
     return { ok: false, reason: 'Homebrew did not install a newer version: its tap does not have it yet. Try again later.' };
   }
   return { ok: true };

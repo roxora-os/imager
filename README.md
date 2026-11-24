@@ -10,6 +10,10 @@ images in two ways, or saves them as a file:
   compares it with the release.
 - **Board storage over USB (Maskrom).** Writes a board's eMMC or SPI NOR
   flash through its USB-C port, with the same read-back check.
+  On the eMMC it can also write a vendor's Rockchip `update.img` (a
+  factory firmware package) the way RKDevTool's Upgrade Firmware does, and
+  after a whole image it can clear the old backup partition table at the
+  end of the storage (off unless ticked). Desktop app only.
 - **Save as an image file.** Saves the uncompressed .img where you choose,
   for Ventoy and similar boot-from-file devices or a virtual machine. The
   download is checked as above, and the decompressed file against the
@@ -77,6 +81,16 @@ stand-ins).
 | ![Destination step: an SD card or USB drive, or the board's own storage over USB in Maskrom mode](docs/screenshots/3-destination-dark.webp) | ![Review step: what will be written where, and the checks before and after](docs/screenshots/4-review-dark.webp) |
 | 3. Destination: SD card or USB drive, or the board over USB | 4. Review: what is erased, and how it is checked |
 
+## Languages
+
+The app, and its web version, are in English and Simplified Chinese. They
+follow the system language until you pick one with the language button in
+the masthead or in Settings (kept on this computer). The texts are in
+`src/renderer/messages.ts`, keyed by the English text, and a test fails
+when a text the page shows has no Chinese. Messages from the writer and
+the Maskrom sequence are shown in Chinese where they are known; any other
+stays in English. `src/shared/i18n.ts` is shared with Maskrom Studio.
+
 ## Install
 
 Windows (x64 and arm64), macOS (Apple silicon and Intel) and Linux
@@ -94,12 +108,18 @@ brew trust gahingwoo/tap
 brew install --cask gahingwoo/tap/roxora-imager
 ```
 
+`gahingwoo/tap/roxora-imager@nightly` is the latest build of main instead
+(untested; the app's CI tier). Releasing, the casks and the `ci` release:
+[docs/release.md](docs/release.md).
+
 The app looks for a newer version once a day and offers to install it
-(Settings has "Check now" and the switch to turn the check off). Normal
-releases are offered to everyone. Beta versions are the pre-releases on
-GitHub, with a version such as 0.1.5-beta.1; they are offered only when
-"Also offer beta versions" is turned on in Settings, and
-`install.sh` installs one only with `BETA=1`. Updates are installed inside
+(Settings has "Check now" and the switch to turn the check off). Which
+releases it offers is the release tier in Settings: **Stable** (the
+default) the normal releases; **Prerelease** the betas too, the
+pre-releases on GitHub with a version such as 0.1.5-beta.1; **CI** the
+rolling `ci` release, an untested build of main that the Release workflow
+replaces on every successful build. `install.sh` installs a beta only with
+`BETA=1`, and never the `ci` release. Updates are installed inside
 the app after you confirm; how depends on how the app was installed (on
 macOS through Homebrew or by replacing the app from the new DMG):
 [docs/install.md](docs/install.md#updates).
@@ -152,6 +172,16 @@ Safety rules:
 - A Maskrom write names the storage (eMMC or SPI NOR) and fails before
   writing anything if the board does not switch to it or the image does not
   fit.
+- An `update.img` (`src/maskrom/rkfw.ts`, from Maskrom Studio) is read
+  before anything is written: refused unless its header and its loader are
+  for RK3576, unless every partition image fits the place its parameter.txt
+  gives it, and when the MD5 the packer appended does not match. It is
+  then written as RKDevTool does: `gpt` with its parameter.txt, `ul` with
+  its loader, then `wl` of each partition at its sector. Everything written
+  in the first 32 MiB is read back and compared; past that only samples
+  are, and a sample that differs is reported, not counted as a failure,
+  because RK3576 loaders return filler for reads there. Not yet tried on a
+  board.
 
 ## Building
 

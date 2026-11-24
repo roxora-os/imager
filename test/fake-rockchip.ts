@@ -119,8 +119,8 @@ export class FakeBoard {
     setTimeout(() => { this.devices = [new FakeUsbDevice(this, true, !this.opts.loaderLooksLikeMaskrom)]; }, 300);
   }
 
-  contents(code: number, length: number): Uint8Array {
-    return this.storages.get(code)!.read(0, length);
+  contents(code: number, length: number, offset = 0): Uint8Array {
+    return this.storages.get(code)!.read(offset, length);
   }
 }
 

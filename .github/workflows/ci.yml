@@ -31,10 +31,24 @@ jobs:
         with:
           name: rkdeveloptool-wasm
           path: vendor/rkdeveloptool-wasm
+      # fonts-noto-cjk: the runner has no Chinese font, so the zh-CN
+      # screenshots would come out as boxes. A mirror that hangs fails the
+      # step in minutes and is tried again; without the font the rest of the
+      # job still runs.
+      - name: A Chinese font
+        timeout-minutes: 12
+        continue-on-error: true
+        run: |
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for i in 1 2 3; do
+            sudo apt-get $APT update -qq && sudo apt-get $APT install -y -qq fonts-noto-cjk && exit 0
+            echo "apt failed (try $i); again in 20 s"; sleep 20
+          done
+          exit 1
       - name: Shell scripts
         run: shellcheck -S warning install.sh packaging/*.sh scripts/*.sh
       - run: npm run typecheck
-      - name: Unit tests (catalog, targets, Maskrom through the WASM against a pretend board)
+      - name: Unit tests (catalog, targets, both languages, Maskrom through the WASM against a pretend board)
         run: npm test
       - name: Maskrom loader built from rkbin matches its pin
         run: node scripts/check-loader.mjs
@@ -83,6 +97,25 @@ jobs:
         run: node test/e2e/sd-ramdisk-mac.mjs
       - name: In-app update, swap the app for the one in a DMG (real hdiutil, ditto, xattr)
         run: node test/e2e/update-dmg-mac.mjs
+      # The casks of gahingwoo/homebrew-tap as scripts/bump-cask.mjs writes
+      # them (made-up checksums for the tagged one), in a local tap, through
+      # brew's own style check and an offline audit.
+      - name: Homebrew casks pass brew style and audit
+        run: |
+          set -eux
+          mkdir -p /tmp/casks
+          node scripts/bump-cask.mjs ci /tmp/casks
+          node --input-type=module -e "
+            import { taggedCask } from './scripts/bump-cask.mjs';
+            import { writeFileSync } from 'node:fs';
+            const c = taggedCask('v0.2.0', { arm: 'a'.repeat(64), intel: 'b'.repeat(64) });
+            writeFileSync('/tmp/casks/' + c.name + '.rb', c.text);"
+          brew tap-new --no-git local/check
+          mkdir -p "$(brew --repository local/check)/Casks"
+          cp /tmp/casks/*.rb "$(brew --repository local/check)/Casks/"
+          brew style local/check
+          brew trust local/check || true
+          for c in roxora-imager roxora-imager@nightly; do brew audit --cask --strict "local/check/$c"; done
 
   sd-e2e:
     name: SD write to a loop device

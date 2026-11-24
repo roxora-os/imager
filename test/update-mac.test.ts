@@ -39,6 +39,10 @@ describe('the Homebrew commands', () => {
       upgrade: ['/opt/homebrew/bin/brew', 'upgrade', '--cask', 'roxora-imager'],
     });
   });
+  it('upgrade the nightly cask greedily: it is version :latest', () => {
+    expect(brewSteps('/opt/homebrew/bin/brew', 'roxora-imager@nightly').upgrade)
+      .toEqual(['/opt/homebrew/bin/brew', 'upgrade', '--cask', '--greedy', 'roxora-imager@nightly']);
+  });
   it('run with brew on the PATH and without overriding the cleanup', () => {
     const e = brewEnv('/opt/homebrew/bin/brew', { PATH: '/usr/bin:/bin', HOMEBREW_NO_INSTALL_CLEANUP: '1', HOME: '/Users/u' });
     expect(e.PATH).toBe('/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin');

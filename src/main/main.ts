@@ -9,13 +9,16 @@ import * as drivelist from 'drivelist';
 import { formatBytes } from '../shared/format';
 import { classifyDrives, isOfferedTarget, type DriveInfo } from '../shared/targets';
 import { withDiskFacts } from './linux-disks';
-import type { JobProgress, JobResult, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
+import type { UpdateImageFile, JobProgress, JobResult, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
 import type { CatalogImage } from '../shared/catalog';
 import { partitionedSize } from '../maskrom/spi-check';
 import { loadReleases, loadSample, writableImage, writableImages, type CatalogState } from './catalog-source';
 import { helperLaunch, runHelper, sudoPromptElevate } from './elevate';
 import { decompress, detectCompression, fetchImage, forgetFile, serveFile, serveFileAs, servedPaths } from './images';
 import { cacheInfo, clearCache, inCache } from './cache';
+import { checkUpdateMd5, inspectUpdateImage } from './update-image';
+import { planFactory, summarize } from '../maskrom/rkfw';
+import { isChannel } from '../shared/channel';
 import { ensureLoader } from './loader-cache';
 import { describeLocal, measureFile, sha256OfFile } from './local-image';
 import { handleProtocol, ORIGIN, registerScheme } from './protocol';
@@ -412,6 +415,32 @@ ipcMain.handle('maskrom:pick', async (e) => {
   }
 });
 
+ipcMain.handle('maskrom:pick-update', async (e): Promise<UpdateImageFile | { error: string } | null> => {
+  if (job) return { error: 'Another job is running.' };
+  const r = await dialog.showOpenDialog(win!, {
+    title: 'Choose the Rockchip update.img',
+    properties: ['openFile'],
+    filters: [{ name: 'Rockchip firmware package', extensions: ['img'] }, { name: 'All files', extensions: ['*'] }],
+  });
+  if (r.canceled || r.filePaths.length === 0) return null;
+  const path = r.filePaths[0];
+  job = new AbortController();
+  try {
+    const info = inspectUpdateImage(path);
+    const plan = planFactory(info, null);
+    if ('stop' in plan) return { error: plan.stop };
+    const bad = await checkUpdateMd5(path, info, (bytes, total) => sendProgress(e.sender, { stage: 'check', bytes, total }), job.signal);
+    if (bad) return { error: bad };
+    const s = serveFile(path);
+    return { token: s.token, url: `${ORIGIN}/file/${s.token}`, size: s.size, sha256: null, name: basename(path),
+      update: summarize(info, plan), md5Checked: info.md5 !== null };
+  } catch (err) {
+    return { error: String((err as Error).message ?? err) };
+  } finally {
+    job = null;
+  }
+});
+
 ipcMain.handle('maskrom:loader', async (_e, name: string) => {
   try {
     await ensureLoader(loaderDir(), name, (url) => net.fetch(url));
@@ -433,17 +462,19 @@ ipcMain.on('usb:answer', (e, deviceId: string) => {
 
 ipcMain.handle('settings:get', () => {
   const s = loadSettings();
-  return { updateCheck: s.updateCheck, betaUpdates: s.betaUpdates, resetAfterMaskrom: s.resetAfterMaskrom };
+  return { updateCheck: s.updateCheck, appChannel: s.appChannel, resetAfterMaskrom: s.resetAfterMaskrom };
 });
-ipcMain.handle('settings:set', (_e, patch: { updateCheck?: boolean; betaUpdates?: boolean; resetAfterMaskrom?: boolean }) => {
+ipcMain.handle('settings:set', (_e, patch: { updateCheck?: boolean; appChannel?: unknown; resetAfterMaskrom?: boolean }) => {
   const s = loadSettings();
   saveSettings({
     ...s,
     ...(typeof patch.updateCheck === 'boolean' ? { updateCheck: patch.updateCheck } : {}),
-    ...(typeof patch.betaUpdates === 'boolean' ? { betaUpdates: patch.betaUpdates } : {}),
+    // Another tier: the last offer was for the old one.
+    ...(isChannel(patch.appChannel) ? { appChannel: patch.appChannel, ...(patch.appChannel !== s.appChannel ? { knownRelease: null, lastUpdateCheck: 0 } : {}) } : {}),
     ...(typeof patch.resetAfterMaskrom === 'boolean' ? { resetAfterMaskrom: patch.resetAfterMaskrom } : {}),
   });
 });
+
 ipcMain.handle('cache:info', () => cacheInfo(app.getPath('userData')));
 ipcMain.handle('cache:clear', () => {
   const data = app.getPath('userData');

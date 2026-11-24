@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- Simplified Chinese. The page follows the system language until one is
+  chosen in the Display language dialog (the globe in the masthead) or in
+  Settings. Known messages from the writer and the Maskrom sequence are
+  shown in Chinese too.
+- Maskrom, eMMC: write a vendor's Rockchip update.img (a factory firmware
+  package): read and refused for another chip, its MD5 checked, then its
+  partition table, loader and partitions written as RKDevTool's Upgrade
+  Firmware does, and the first 32 MiB read back. Not yet tried on a board.
+- Maskrom, eMMC or the board's SD card: "Also clear the old backup
+  partition table at the end of the storage", off by default, zeroes the
+  last 33 sectors after a whole image so no tool finds a stale GPT there.
+- Homebrew: a `roxora-imager@nightly` cask for the CI builds next to
+  `roxora-imager`, both written by `scripts/bump-cask.mjs`; a release opens
+  the pull request to the tap. The in-app update knows which cask it came
+  from, upgrades the nightly one with `--greedy`, and says how to switch
+  casks when the tier and the cask disagree.
+- Release tiers for the app's own updates, in Settings: Stable, Prerelease
+  and CI, in place of the beta switch (beta on becomes Prerelease). CI is
+  the rolling `ci` release, an untested build of main that the Release
+  workflow replaces on every successful build, offered when it comes from
+  another commit than the running copy. install.sh never installs it.
 - About Roxora Imager, from Settings: the version with the commit and date
   it was built from, the PatternFly it uses, what it connects to (GitHub,
   and Rockchip's rkbin once; no analytics or telemetry), where it keeps

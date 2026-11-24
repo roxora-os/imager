@@ -1,17 +1,17 @@
 // Runs one Maskrom write in a worker and reports back.
 import type { WorkerEvent, WorkerRequest } from '../maskrom/worker';
-import type { FlashResult, Stage } from '../maskrom/sequence';
+import type { FlashResult, RegionResult, Stage } from '../maskrom/sequence';
 
 export interface MaskromJob {
-  done: Promise<FlashResult>;
+  done: Promise<FlashResult | RegionResult>;
   cancel(): void;
 }
 
 export function startMaskrom(req: Omit<WorkerRequest, 'type' | 'moduleUrl' | 'wasmUrl' | 'xzWasmUrl'>,
   on: { log(line: string): void; stage(s: Stage, detail?: string): void; progress(s: Stage, pct: number): void }): MaskromJob {
   const w = new Worker('maskrom-worker.js', { type: 'module' });
-  let resolve!: (r: FlashResult) => void;
-  const done = new Promise<FlashResult>((r) => { resolve = r; });
+  let resolve!: (r: FlashResult | RegionResult) => void;
+  const done = new Promise<FlashResult | RegionResult>((r) => { resolve = r; });
   w.onmessage = (e: MessageEvent<WorkerEvent>) => {
     const m = e.data;
     if (m.type === 'log') on.log(m.line);

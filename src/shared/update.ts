@@ -1,6 +1,8 @@
 // Is a newer version of the app out, and how would this copy be updated?
 // Pure logic; main/updater.ts and main/update-install.ts do the I/O.
 
+import { ciCommit, CI_TAG, pickRelease, sameCommit, type Channel } from './channel';
+
 export const UPDATE_INTERVAL = 24 * 60 * 60 * 1000;
 
 /**
@@ -51,6 +53,8 @@ export interface ReleaseAsset {
 
 export interface AppRelease {
   tag_name: string;
+  /** The title; a CI release's is "CI build <sha> <date>". */
+  name?: string | null;
   html_url: string;
   draft?: boolean;
   /** On GitHub a pre-release of Roxora Imager is a beta version. */
@@ -145,30 +149,45 @@ export function aptRepoCarries(policy: string): boolean {
 }
 
 export const BREW_CASK = 'roxora-imager';
-export const BREW_COMMAND = `brew upgrade --cask ${BREW_CASK}`;
+/** The tap's casks (gahingwoo/homebrew-tap, scripts/bump-cask.mjs): stable, and nightly (the ci release). */
+export const BREW_CASKS = ['roxora-imager', 'roxora-imager@nightly'];
+/** The command that updates a cask; a nightly one is version :latest, which brew upgrades only with --greedy. */
+export const brewCommand = (cask = BREW_CASK) => `brew upgrade --cask ${cask.endsWith('@nightly') ? '--greedy ' : ''}${cask}`;
+export const BREW_COMMAND = brewCommand();
 
 /**
- * Is the app bundle at `appPath` one a Homebrew cask installed? Either it
- * lies inside a Caskroom, or (what Homebrew does today: the app is moved to
- * /Applications and a link is left behind) a Caskroom holds a link to it.
+ * Which of the tap's casks installed the app bundle at `appPath`, or null.
+ * Either the bundle lies inside a Caskroom, or (what Homebrew does today:
+ * the app is moved to /Applications and a link is left behind) a Caskroom
+ * holds a link to it.
  */
-export function brewCaskOwns(appPath: string, fs: {
+export function brewCaskName(appPath: string, fs: {
   realpath: (p: string) => string; readdir: (p: string) => string[];
-}, prefixes: string[] = ['/opt/homebrew', '/usr/local']): boolean {
+}, prefixes: string[] = ['/opt/homebrew', '/usr/local']): string | null {
   const real = (p: string) => { try { return fs.realpath(p); } catch { return null; } };
   const app = real(appPath) ?? appPath;
-  if (/\/Caskroom\/[^/]+\//.test(app) || /\/Caskroom\/[^/]+\//.test(appPath)) return true;
+  for (const p of [app, appPath]) {
+    const m = /\/Caskroom\/([^/]+)\//.exec(p);
+    if (m) return m[1];
+  }
   for (const prefix of prefixes) {
-    const room = `${prefix}/Caskroom/${BREW_CASK}`;
-    let versions: string[];
-    try { versions = fs.readdir(room); } catch { continue; }
-    for (const v of versions) {
-      let entries: string[];
-      try { entries = fs.readdir(`${room}/${v}`); } catch { continue; }
-      if (entries.some((e) => e.endsWith('.app') && real(`${room}/${v}/${e}`) === app)) return true;
+    for (const cask of BREW_CASKS) {
+      const room = `${prefix}/Caskroom/${cask}`;
+      let versions: string[];
+      try { versions = fs.readdir(room); } catch { continue; }
+      for (const v of versions) {
+        let entries: string[];
+        try { entries = fs.readdir(`${room}/${v}`); } catch { continue; }
+        if (entries.some((e) => e.endsWith('.app') && real(`${room}/${v}/${e}`) === app)) return cask;
+      }
     }
   }
-  return false;
+  return null;
+}
+
+/** Is the app bundle at `appPath` one a Homebrew cask installed? */
+export function brewCaskOwns(appPath: string, fs: { realpath: (p: string) => string; readdir: (p: string) => string[] }, prefixes?: string[]): boolean {
+  return brewCaskName(appPath, fs, prefixes) !== null;
 }
 
 /** The release file for this kind of install and CPU ('x64' or 'arm64'), as release.yml names them. */
@@ -199,6 +218,8 @@ export interface UpdateOffer {
   url: string;
   /** A beta version (a pre-release on GitHub). */
   beta: boolean;
+  /** The rolling CI build (the CI tier): `version` is "CI build <sha>". */
+  ci?: boolean;
   /** The first item of the release notes. */
   notes: string;
   kind: InstallKind;
@@ -209,7 +230,7 @@ export interface UpdateOffer {
 export type UpdateCheck =
   | { state: 'newer'; offer: UpdateOffer }
   /** Nothing newer. `beta`: the running version is a beta; `newerBeta`: a newer beta exists but betas are not asked for. */
-  | { state: 'current'; version: string; beta: boolean; newerBeta: string | null }
+  | { state: 'current'; version: string; beta: boolean; newerBeta: string | null; ci?: boolean }
   | { state: 'error'; message: string };
 
 /** What a release list means for the running version. */
@@ -235,3 +256,23 @@ export type UpdateResult =
   | { ok: true; message: string; restart: boolean }
   /** `command`: what the user can run instead. */
   | { ok: false; reason: string; command?: string };
+
+/**
+ * What a release list means for the running copy in a tier (channel.ts).
+ * Stable and Prerelease compare versions, the rolling "ci" release left out;
+ * CI offers the ci release when it was built from another commit than this
+ * copy (`commit`, the build's).
+ */
+export function judgeChannel(current: string, commit: string, list: AppRelease[], o: { channel: Channel; kind: InstallKind; arch: string }): UpdateCheck {
+  if (o.channel !== 'ci') return judgeReleases(current, list.filter((r) => r?.tag_name !== CI_TAG), { beta: o.channel === 'prerelease', kind: o.kind, arch: o.arch });
+  const ci = pickRelease(list, 'ci');
+  const built = ci ? ciCommit(ci) : null;
+  if (ci && built && !sameCommit(built, commit)) {
+    const asset = pickAsset(ci.assets, o.kind, o.arch);
+    return { state: 'newer', offer: {
+      version: `CI build ${built.slice(0, 7)}`, url: ci.html_url, beta: true, ci: true, notes: whatsNew(ci.body), kind: o.kind,
+      asset: asset ? { name: asset.name, size: asset.size } : null,
+    } };
+  }
+  return { state: 'current', version: current, beta: current.includes('-'), newerBeta: null, ci: true };
+}

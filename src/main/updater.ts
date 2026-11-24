@@ -2,8 +2,9 @@
 // user asks.
 //
 // The check runs at most once a day, and not at all when turned off in the
-// settings. Normal releases are offered to everyone; betas (pre-releases on
-// GitHub) only when the setting asks for them. Nothing is downloaded or
+// settings. Which releases are offered is the tier chosen in Settings
+// (shared/channel.ts): Stable the newest normal release, Prerelease betas
+// too, CI the rolling build of main when it is from another commit. Nothing is downloaded or
 // installed before the user presses Update and confirms. How the update
 // goes depends on how this copy was installed (shared/update.ts,
 // installKind): a Homebrew cask is upgraded by running brew, the app from a
@@ -20,10 +21,11 @@ import { existsSync, mkdtempSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
-  APT_COMMAND, APT_PACKAGE, aptRepoCarries, assetSha256, BREW_COMMAND, brewCaskOwns, checkDue, installKind, judgeReleases,
-  newestRelease, pickAsset,
+  APT_COMMAND, APT_PACKAGE, aptRepoCarries, assetSha256, BREW_CASK, brewCaskName, brewCommand, checkDue, installKind, judgeChannel,
+  pickAsset,
   type AppRelease, type InstallKind, type ReleaseAsset, type UpdateCheck, type UpdateResult,
 } from '../shared/update';
+import { pickRelease, type Channel } from '../shared/channel';
 import { loadSettings, saveSettings } from './settings';
 import { brewUpgrade, findBrew, NotInPlace, removeOldBundle, run, swapAppFromDmg } from './update-mac';
 import {
@@ -50,6 +52,8 @@ export function afterUpdateCleanup(): void {
 }
 
 let install: { kind: InstallKind; arch: string } | null = null;
+/** The tap's cask this copy came from, when Homebrew installed it. */
+let brewCask: string | null = null;
 /** How this copy was installed, and for which CPU. Looked up once. */
 export function detectInstall(): { kind: InstallKind; arch: string } {
   if (install) return install;
@@ -58,7 +62,7 @@ export function detectInstall(): { kind: InstallKind; arch: string } {
   const dpkg = platform === 'linux' && !process.env.APPIMAGE && owns('dpkg-query', ['-S', exe]);
   const kind = installKind({
     platform, packaged: app.isPackaged, appImage: process.env.APPIMAGE,
-    brew: platform === 'darwin' && brewCaskOwns(exe.replace(/\/Contents\/MacOS\/[^/]+$/, ''), { realpath: realpathSync, readdir: readdirSync }),
+    brew: platform === 'darwin' && (brewCask = brewCaskName(exe.replace(/\/Contents\/MacOS\/[^/]+$/, ''), { realpath: realpathSync, readdir: readdirSync })) !== null,
     nsis: platform === 'win32' && existsSync(join(dirname(exe), 'Uninstall Roxora Imager.exe')),
     dpkg,
     rpm: platform === 'linux' && !process.env.APPIMAGE && owns('rpm', ['-qf', exe]),
@@ -91,11 +95,15 @@ function fakeCheck(): UpdateCheck {
 /** The release the last check offered, with the file to download. */
 let offered: { release: AppRelease; asset: ReleaseAsset | null; kind: InstallKind } | null = null;
 
-function judge(list: AppRelease[], beta: boolean): UpdateCheck {
+declare const __BUILD_COMMIT__: string;
+/** The commit this copy was built from (scripts/build.mjs), for the CI tier. */
+const BUILD_COMMIT = typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : 'unknown';
+
+function judge(list: AppRelease[], channel: Channel): UpdateCheck {
   const { kind, arch } = detectInstall();
-  const res = judgeReleases(app.getVersion(), list, { beta, kind, arch });
+  const res = judgeChannel(app.getVersion(), BUILD_COMMIT, list, { channel, kind, arch });
   if (res.state === 'newer') {
-    const release = newestRelease(list, { beta })!;
+    const release = channel === 'ci' ? pickRelease(list, 'ci')! : pickRelease(list.filter((r) => r.tag_name !== 'ci'), channel)!;
     offered = { release, asset: pickAsset(release.assets, kind, arch), kind };
   }
   return res;
@@ -111,7 +119,7 @@ export async function checkForUpdate(force = false): Promise<UpdateCheck | null>
   const s = loadSettings();
   const now = Date.now();
   const remembered = () => {
-    const r = s.knownRelease ? judge([s.knownRelease], s.betaUpdates) : null;
+    const r = s.knownRelease ? judge([s.knownRelease], s.appChannel) : null;
     return r?.state === 'newer' ? r : null;
   };
   if (!force && !checkDue(s.updateCheck, s.lastUpdateCheck, now)) return s.updateCheck ? remembered() : null;
@@ -122,10 +130,10 @@ export async function checkForUpdate(force = false): Promise<UpdateCheck | null>
     // Try again at the next start rather than in a day.
     return force ? { state: 'error', message: `Could not reach GitHub (${(e as Error).message}).` } : remembered();
   }
-  const res = judge(list, s.betaUpdates);
+  const res = judge(list, s.appChannel);
   // Only what the next start needs: the release and the one file for this install.
   const keep = res.state === 'newer' && offered ? {
-    tag_name: offered.release.tag_name, html_url: offered.release.html_url, prerelease: offered.release.prerelease === true,
+    tag_name: offered.release.tag_name, name: offered.release.name ?? null, html_url: offered.release.html_url, prerelease: offered.release.prerelease === true,
     body: (offered.release.body ?? '').slice(0, 2000), assets: offered.asset ? [offered.asset] : [],
   } : null;
   saveSettings({ ...loadSettings(), lastUpdateCheck: now, knownRelease: keep });
@@ -157,7 +165,7 @@ async function bundleVersion(): Promise<string | null> {
 /** Download and install what the last check offered. Called only after the user confirmed. */
 export async function installUpdate(wc: WebContents): Promise<UpdateResult> {
   // The screenshots: as on a Mac without Homebrew.
-  if (FAKE) return { ok: false, reason: 'Homebrew was not found on this Mac. You can update in Terminal:', command: BREW_COMMAND };
+  if (FAKE) return { ok: false, reason: 'Homebrew was not found on this Mac. You can update in Terminal:', command: brewCommand() };
   const o = offered;
   if (!o) return { ok: false, reason: 'Check for a new version again.' };
   if (running) return { ok: false, reason: 'An update is already being downloaded.' };
@@ -166,16 +174,25 @@ export async function installUpdate(wc: WebContents): Promise<UpdateResult> {
   const stage = (name: string) => send('update:stage', name);
   if (o.kind === 'brew') {
     // As the user, never as root; brew refuses root anyway.
+    const cask = brewCask ?? BREW_CASK;
+    // The CI tier comes from the nightly cask, the other two from the stable
+    // one: a copy from the other cask has to be swapped, which the user does.
+    const wantNightly = loadSettings().appChannel === 'ci';
+    if (wantNightly !== cask.endsWith('@nightly')) {
+      const other = wantNightly ? 'roxora-imager@nightly' : BREW_CASK;
+      return { ok: false, reason: `This copy came from the Homebrew cask ${cask}, which does not carry ${wantNightly ? 'CI builds' : 'releases'}. Switch to ${other} in Terminal:`,
+        command: `brew uninstall --cask ${cask} && brew install --cask gahingwoo/tap/${other}` };
+    }
     running = new AbortController();
     try {
       const brew = await findBrew();
-      if (!brew) return { ok: false, reason: 'Homebrew was not found on this Mac. You can update in Terminal:', command: BREW_COMMAND };
+      if (!brew) return { ok: false, reason: 'Homebrew was not found on this Mac. You can update in Terminal:', command: brewCommand(cask) };
       const r = await brewUpgrade({
-        brew, runningVersion: app.getVersion(), installedVersion: bundleVersion, onLog: log, signal: running.signal,
+        brew, cask, runningVersion: app.getVersion(), installedVersion: bundleVersion, onLog: log, signal: running.signal,
         onStage: (st) => stage(st === 'update' ? 'brew-update' : 'brew-upgrade'),
       });
       if (r.ok) return { ok: true, restart: true, message: `Homebrew installed Roxora Imager ${o.release.tag_name.replace(/^v/, '')}. Restart to use it.` };
-      return r.cancelled ? { ok: false, reason: r.reason } : { ok: false, reason: `${r.reason} Its output is below. You can also update in Terminal:`, command: BREW_COMMAND };
+      return r.cancelled ? { ok: false, reason: r.reason } : { ok: false, reason: `${r.reason} Its output is below. You can also update in Terminal:`, command: brewCommand(cask) };
     } finally {
       running = null;
     }

@@ -7,7 +7,8 @@
 // app://local/file/<token> (see main/protocol.ts), a few MiB at a time.
 
 import { createRunner } from './runner';
-import { flash, type FlashPlan, type Stage } from './sequence';
+import { flash, flashRegions, TRUSTED_READ_BYTES, type FlashPlan, type FlashResult, type RegionResult, type Stage } from './sequence';
+import { planUpdateRegions, readUpdateImage } from './rkfw';
 import type { ByteSource } from './rkcore';
 import { rawSource, xzSource } from './file-source';
 import { detectFormat, hasSpecialMagic } from '../web/webflash/image-source.js';
@@ -46,13 +47,21 @@ export type WorkerRequest =
       /** Web: the file the user picked (.img or .img.xz), read here. */
       file?: File; xzWasmUrl?: string;
       size: number; sha256: string | null; storageCode: number; storageLabel: string;
-      verify: boolean; resetAfter: boolean; reconnectTimeout?: number };
+      verify: boolean; resetAfter: boolean; reconnectTimeout?: number;
+      /** A whole image: also zero the old backup GPT at the end of the storage (sequence.ts). */
+      clearBackupGpt?: boolean;
+      /**
+       * A Rockchip update.img (fileUrl): its partition table, loader and
+       * partitions where its parameter.txt puts them (rkfw.ts), instead of
+       * one image from sector 0.
+       */
+      updateImage?: boolean };
 
 export type WorkerEvent =
   | { type: 'log'; line: string }
   | { type: 'stage'; stage: Stage; detail?: string }
   | { type: 'progress'; stage: Stage; percent: number }
-  | { type: 'result'; result: Awaited<ReturnType<typeof flash>> };
+  | { type: 'result'; result: FlashResult | RegionResult };
 
 const post = (m: WorkerEvent) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m);
 
@@ -105,23 +114,43 @@ self.addEventListener('message', async (ev: MessageEvent<WorkerRequest>) => {
       locateFile: (p) => (p.endsWith('.wasm') ? m.wasmUrl : p),
     });
     const loader = new Uint8Array(await (await fetch(m.loaderUrl)).arrayBuffer());
+    let lastPct = -1;
+    const hooks = {
+      stage: (stage: Stage, detail?: string) => post({ type: 'stage', stage, ...(detail ? { detail } : {}) }),
+      progress: (stage: Stage, percent: number) => {
+        if (percent !== lastPct) { lastPct = percent; post({ type: 'progress', stage, percent }); }
+      },
+      log: (line: string) => post({ type: 'log', line }),
+      sleep: (ms: number) => new Promise<void>((r) => setTimeout(r, ms)),
+      cancelled: () => false, // cancelling terminates the worker
+    };
+    if (m.updateImage) {
+      const file = xhrSource(m.fileUrl!, m.size);
+      const pkg = readUpdateImage(file);
+      const result = await flashRegions(runner, {
+        loader, storageCode: m.storageCode, storageLabel: m.storageLabel, checkHeadBytes: TRUSTED_READ_BYTES, resetAfter: m.resetAfter,
+        ...(m.reconnectTimeout ? { reconnectTimeout: m.reconnectTimeout } : {}),
+        plan: (capacity) => {
+          const r = planUpdateRegions(file, pkg, capacity);
+          if ('stop' in r) return r;
+          // As RKDevTool's "Upgrade Firmware": the partition table from parameter.txt, then the loader, then the partitions.
+          return { regions: r.regions, before: [
+            { what: 'Writing the partition table', files: [{ name: 'parameter.txt', data: r.parameter }], args: ([f]) => ['gpt', f] },
+            { what: 'Writing the boot loader', files: [{ name: 'MiniLoaderAll.bin', data: r.loader }], args: ([f]) => ['ul', f] },
+          ] };
+        },
+      }, hooks);
+      post({ type: 'result', result });
+      return;
+    }
     const source = m.file ? await pickedFileSource(m.file, m.xzWasmUrl!) : xhrSource(m.fileUrl!, m.size);
     const plan: FlashPlan = {
       loader, storageCode: m.storageCode, storageLabel: m.storageLabel,
       source, expectedSha256: m.sha256,
-      verify: m.verify, resetAfter: m.resetAfter,
+      verify: m.verify, resetAfter: m.resetAfter, clearBackupGpt: m.clearBackupGpt === true,
       ...(m.reconnectTimeout ? { reconnectTimeout: m.reconnectTimeout } : {}),
     };
-    let lastPct = -1;
-    const result = await flash(runner, plan, {
-      stage: (stage, detail) => post({ type: 'stage', stage, ...(detail ? { detail } : {}) }),
-      progress: (stage, percent) => {
-        if (percent !== lastPct) { lastPct = percent; post({ type: 'progress', stage, percent }); }
-      },
-      log: (line) => post({ type: 'log', line }),
-      sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
-      cancelled: () => false, // cancelling terminates the worker
-    });
+    const result = await flash(runner, plan, hooks);
     post({ type: 'result', result });
   } catch (e) {
     post({ type: 'result', result: { ok: false, reason: 'The Maskrom writer could not start.', detail: String((e as Error)?.message ?? e) } });

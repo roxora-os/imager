@@ -2,6 +2,8 @@
 import type { CatalogImage } from './catalog';
 import type { HiddenDrive, Target } from './targets';
 import type { UpdateCheck, UpdateResult } from './update';
+import type { Channel } from './channel';
+import type { UpdateSummary } from '../maskrom/rkfw';
 import type { CacheInfo, ClearResult } from '../main/cache';
 
 export type CatalogResult =
@@ -17,6 +19,13 @@ export type JobProgress = {
 };
 
 export type JobResult = { ok: true; sha256: string } | { ok: false; reason: string; detail?: string };
+
+export interface UpdateImageFile extends PreparedFile {
+  /** What the package holds and where its partitions go. */
+  update: UpdateSummary;
+  /** Whether the MD5 the packer appended was there to check (it matched, or the file was refused). */
+  md5Checked: boolean;
+}
 
 export interface PreparedFile {
   token: string;
@@ -99,6 +108,12 @@ export interface ImagerApi {
   prepareMaskrom(imageId: string, what?: 'image' | 'spi'): Promise<PreparedFile | { error: string }>;
   pickMaskromFile(): Promise<PreparedFile | { error: string } | null>;
   /**
+   * Desktop only: choose a Rockchip update.img (a vendor's factory firmware
+   * package) for the eMMC. It is read (rkfw.ts), refused for another chip,
+   * and its MD5 checked before it is offered.
+   */
+  pickUpdateImage?(): Promise<UpdateImageFile | { error: string } | null>;
+  /**
    * Web build only: the user picks the release file they downloaded; it is
    * checked against the catalog before it is accepted.
    */
@@ -126,8 +141,8 @@ export interface ImagerApi {
   releaseMaskrom(token: string): Promise<void>;
   onUsbChoice(cb: (choices: { deviceId: string; productName?: string; productId: number }[]) => void): () => void;
   answerUsbChoice(deviceId: string): void;
-  getSettings(): Promise<{ updateCheck: boolean; betaUpdates?: boolean; resetAfterMaskrom: boolean }>;
-  setSettings(s: { updateCheck?: boolean; betaUpdates?: boolean; resetAfterMaskrom?: boolean }): Promise<void>;
+  getSettings(): Promise<{ updateCheck: boolean; appChannel?: Channel; resetAfterMaskrom: boolean }>;
+  setSettings(s: { updateCheck?: boolean; appChannel?: Channel; resetAfterMaskrom?: boolean }): Promise<void>;
   /** Desktop only: what the downloads and the Maskrom loaders take in the user data folder. */
   cacheInfo?(): Promise<CacheInfo>;
   /** Desktop only: delete them; refused while a write runs. */

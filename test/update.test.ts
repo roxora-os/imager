@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  aptRepoCarries, assetSha256, brewCaskOwns, checkDue, compareVersions, installKind, judgeReleases, newestRelease, pickAsset,
+  aptRepoCarries, assetSha256, brewCaskName, brewCaskOwns, brewCommand, checkDue, compareVersions, installKind, judgeReleases, newestRelease, pickAsset,
   UPDATE_INTERVAL, whatsNew, type AppRelease, type ReleaseAsset,
 } from '../src/shared/update';
 
@@ -188,6 +188,20 @@ describe('how this copy was installed', () => {
     const none = { realpath: (p: string) => p, readdir: () => { throw new Error('ENOENT'); } };
     expect(brewCaskOwns('/usr/local/Caskroom/roxora-imager/0.1.4/Roxora Imager.app', none)).toBe(true);
     expect(brewCaskOwns('/Applications/Roxora Imager.app', none)).toBe(false);
+  });
+  it('names the cask, the nightly one too', () => {
+    const links: Record<string, string> = { '/opt/homebrew/Caskroom/roxora-imager@nightly/latest/Roxora Imager.app': '/Applications/Roxora Imager.app' };
+    const fs = {
+      realpath: (p: string) => links[p] ?? p,
+      readdir: (p: string) => {
+        if (p === '/opt/homebrew/Caskroom/roxora-imager@nightly') return ['latest'];
+        if (p === '/opt/homebrew/Caskroom/roxora-imager@nightly/latest') return ['Roxora Imager.app'];
+        throw new Error('ENOENT');
+      },
+    };
+    expect(brewCaskName('/Applications/Roxora Imager.app', fs)).toBe('roxora-imager@nightly');
+    expect(brewCommand('roxora-imager@nightly')).toBe('brew upgrade --cask --greedy roxora-imager@nightly');
+    expect(brewCommand()).toBe('brew upgrade --cask roxora-imager');
   });
 });
 
