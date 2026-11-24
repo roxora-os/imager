@@ -24,6 +24,7 @@ import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile, S
 import type { CacheInfo } from '../main/cache';
 import { INTERNAL_WORDS, type HiddenDrive, type Target } from '../shared/targets';
 import { APT_COMMAND, type UpdateCheck, type UpdateOffer, type UpdateResult } from '../shared/update';
+import { CHANNELS, type Channel } from '../shared/channel';
 import { maskromBoard, STORAGES, type StorageId } from '../maskrom/boards';
 import { RKBIN_HOST } from '../maskrom/loaders';
 import { SPI_FLASH_FALLBACK, spiFileProblem } from '../maskrom/spi-check';
@@ -863,7 +864,7 @@ function UpdateModal({ offer, onClose }: { offer: UpdateOffer | null; onClose: (
   };
   return (
     <Modal isOpen onClose={close} variant="small" aria-labelledby="update-title">
-      <ModalHeader title={`Update to Roxora Imager ${offer.version}${offer.beta ? ' (beta)' : ''}`} labelId="update-title" />
+      <ModalHeader title={`Update to Roxora Imager ${offerName(offer)}`} labelId="update-title" />
       <ModalBody>
         <Stack hasGutter>
           {brew && !canInstall && (
@@ -925,13 +926,26 @@ function UpdateModal({ offer, onClose }: { offer: UpdateOffer | null; onClose: (
 /** The answer to "Check now", in a sentence. */
 function checkWords(c: UpdateCheck): string {
   if (c.state === 'error') return c.message;
-  if (c.state === 'newer') return `Roxora Imager ${c.offer.version}${c.offer.beta ? ' (beta)' : ''} is available.`;
-  const beta = c.newerBeta ? ` A newer beta, ${c.newerBeta}, is out; turn on beta versions to be offered it.` : '';
+  if (c.state === 'newer') return `Roxora Imager ${offerName(c.offer)} is available.`;
+  if (c.ci) return `You have the newest CI build (${c.version}), or there is none yet.`;
+  const beta = c.newerBeta ? ` A newer beta, ${c.newerBeta}, is out; choose Prerelease to be offered it.` : '';
   return (c.beta ? `You have ${c.version}, a beta version. There is no newer normal release yet.`
     : `You have the newest version (${c.version}).`) + beta;
 }
 
-type AppSettings = { updateCheck: boolean; betaUpdates?: boolean; resetAfterMaskrom: boolean };
+/** "0.1.11", "0.1.12-beta.1 (beta)", or "CI build 1a2b3c4 (untested)". */
+function offerName(o: UpdateOffer): string {
+  return `${o.version}${o.ci ? ' (untested)' : o.beta ? ' (beta)' : ''}`;
+}
+
+const TIER_NAMES: Record<Channel, string> = { stable: 'Stable', prerelease: 'Prerelease', ci: 'CI' };
+const TIER_HELP: Record<Channel, string> = {
+  stable: 'Normal releases only.',
+  prerelease: 'Betas too (pre-releases on GitHub), before they become a normal release.',
+  ci: 'The latest build of main from the Release workflow: untested, replaced on every successful build.',
+};
+
+type AppSettings = { updateCheck: boolean; appChannel?: Channel; resetAfterMaskrom: boolean };
 
 function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writing, onAbout }: {
   open: boolean; onClose: () => void; theme: Theme; setTheme: (t: Theme) => void;
@@ -987,10 +1001,16 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
                   <Switch id="set-update" label="Check for a new version once a day" isChecked={s.updateCheck}
                     onChange={(_e, v) => { set({ updateCheck: v }); }} />
                 </FormGroup>
-                <FormGroup fieldId="set-beta" label="Beta versions" hasNoPaddingTop>
-                  <Switch id="set-beta" label="Also offer beta versions" isChecked={s.betaUpdates === true}
-                    onChange={(_e, v) => { set({ betaUpdates: v }).then(checkNow); }} />
-                  <FormHelperText><HelperText><HelperTextItem>Pre-releases on GitHub, before they become a normal release.</HelperTextItem></HelperText></FormHelperText>
+                <FormGroup fieldId="app-channel" label="Release tier" role="group">
+                  <ToggleGroup aria-label="Release tier" id="app-channel">
+                    {CHANNELS.map((c) => (
+                      <ToggleGroupItem key={c} text={TIER_NAMES[c]} buttonId={`tier-${c}`} isSelected={(s.appChannel ?? 'stable') === c}
+                        onChange={() => { set({ appChannel: c }).then(checkNow); }} />
+                    ))}
+                  </ToggleGroup>
+                  <FormHelperText><HelperText><HelperTextItem variant={(s.appChannel ?? 'stable') === 'stable' ? 'default' : 'warning'}>
+                    {TIER_HELP[s.appChannel ?? 'stable']}
+                  </HelperTextItem></HelperText></FormHelperText>
                 </FormGroup>
                 <FormGroup fieldId="check-now">
                   <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
@@ -1573,7 +1593,7 @@ export function App() {
       {/* A newer version: above the wizard, never during a write. */}
       {!run && offer && dismissed !== offer.version && (
         <PageSection aria-label="Update" className="update-notice">
-          <Alert isInline variant="info" title={`Roxora Imager ${offer.version}${offer.beta ? ' (beta)' : ''} is available`}
+          <Alert isInline variant="info" title={`Roxora Imager ${offerName(offer)} is available`}
             actionClose={<AlertActionCloseButton onClose={() => dismissUpdate(offer.version)} />}
             actionLinks={(
               <>

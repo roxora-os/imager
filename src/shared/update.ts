@@ -1,6 +1,8 @@
 // Is a newer version of the app out, and how would this copy be updated?
 // Pure logic; main/updater.ts and main/update-install.ts do the I/O.
 
+import { ciCommit, CI_TAG, pickRelease, sameCommit, type Channel } from './channel';
+
 export const UPDATE_INTERVAL = 24 * 60 * 60 * 1000;
 
 /**
@@ -51,6 +53,8 @@ export interface ReleaseAsset {
 
 export interface AppRelease {
   tag_name: string;
+  /** The title; a CI release's is "CI build <sha> <date>". */
+  name?: string | null;
   html_url: string;
   draft?: boolean;
   /** On GitHub a pre-release of Roxora Imager is a beta version. */
@@ -199,6 +203,8 @@ export interface UpdateOffer {
   url: string;
   /** A beta version (a pre-release on GitHub). */
   beta: boolean;
+  /** The rolling CI build (the CI tier): `version` is "CI build <sha>". */
+  ci?: boolean;
   /** The first item of the release notes. */
   notes: string;
   kind: InstallKind;
@@ -209,7 +215,7 @@ export interface UpdateOffer {
 export type UpdateCheck =
   | { state: 'newer'; offer: UpdateOffer }
   /** Nothing newer. `beta`: the running version is a beta; `newerBeta`: a newer beta exists but betas are not asked for. */
-  | { state: 'current'; version: string; beta: boolean; newerBeta: string | null }
+  | { state: 'current'; version: string; beta: boolean; newerBeta: string | null; ci?: boolean }
   | { state: 'error'; message: string };
 
 /** What a release list means for the running version. */
@@ -235,3 +241,23 @@ export type UpdateResult =
   | { ok: true; message: string; restart: boolean }
   /** `command`: what the user can run instead. */
   | { ok: false; reason: string; command?: string };
+
+/**
+ * What a release list means for the running copy in a tier (channel.ts).
+ * Stable and Prerelease compare versions, the rolling "ci" release left out;
+ * CI offers the ci release when it was built from another commit than this
+ * copy (`commit`, the build's).
+ */
+export function judgeChannel(current: string, commit: string, list: AppRelease[], o: { channel: Channel; kind: InstallKind; arch: string }): UpdateCheck {
+  if (o.channel !== 'ci') return judgeReleases(current, list.filter((r) => r?.tag_name !== CI_TAG), { beta: o.channel === 'prerelease', kind: o.kind, arch: o.arch });
+  const ci = pickRelease(list, 'ci');
+  const built = ci ? ciCommit(ci) : null;
+  if (ci && built && !sameCommit(built, commit)) {
+    const asset = pickAsset(ci.assets, o.kind, o.arch);
+    return { state: 'newer', offer: {
+      version: `CI build ${built.slice(0, 7)}`, url: ci.html_url, beta: true, ci: true, notes: whatsNew(ci.body), kind: o.kind,
+      asset: asset ? { name: asset.name, size: asset.size } : null,
+    } };
+  }
+  return { state: 'current', version: current, beta: current.includes('-'), newerBeta: null, ci: true };
+}

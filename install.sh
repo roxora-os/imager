@@ -80,10 +80,12 @@ if [ -n "$beta" ]; then
 fi
 
 # One field per line. In GitHub's JSON each release starts its own fields
-# with "tag_name"; keep those of the first release that is not a draft.
+# with "tag_name"; keep those of the first release that is not a draft
+# and not the rolling "ci" release (an untested build of main, which the
+# app offers only to those who chose the CI tier in Settings).
 # Within it, an asset's digest and download URL follow its name.
 tr ',{}' '\n\n\n' < "$tmp/release.json" | sed 's/^ *//' > "$tmp/fields.all"
-pick=$(awk '/^"tag_name":/ {n++} /^"draft": *false/ && n {print n; exit}' "$tmp/fields.all")
+pick=$(awk '/^"tag_name":/ {n++; ci = ($0 ~ /^"tag_name": *"ci"/)} /^"draft": *false/ && n && !ci {print n; exit}' "$tmp/fields.all")
 [ -n "$pick" ] || die "found no release on GitHub"
 awk -v p="$pick" '/^"tag_name":/ {n++} n == p' "$tmp/fields.all" > "$tmp/fields"
 tag=$(sed -n 's/^"tag_name": *"\([^"]*\)".*/\1/p' "$tmp/fields" | head -1)

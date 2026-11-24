@@ -16,6 +16,7 @@ import { loadReleases, loadSample, writableImage, writableImages, type CatalogSt
 import { helperLaunch, runHelper, sudoPromptElevate } from './elevate';
 import { decompress, detectCompression, fetchImage, forgetFile, serveFile, serveFileAs, servedPaths } from './images';
 import { cacheInfo, clearCache, inCache } from './cache';
+import { isChannel } from '../shared/channel';
 import { ensureLoader } from './loader-cache';
 import { describeLocal, measureFile, sha256OfFile } from './local-image';
 import { handleProtocol, ORIGIN, registerScheme } from './protocol';
@@ -433,17 +434,19 @@ ipcMain.on('usb:answer', (e, deviceId: string) => {
 
 ipcMain.handle('settings:get', () => {
   const s = loadSettings();
-  return { updateCheck: s.updateCheck, betaUpdates: s.betaUpdates, resetAfterMaskrom: s.resetAfterMaskrom };
+  return { updateCheck: s.updateCheck, appChannel: s.appChannel, resetAfterMaskrom: s.resetAfterMaskrom };
 });
-ipcMain.handle('settings:set', (_e, patch: { updateCheck?: boolean; betaUpdates?: boolean; resetAfterMaskrom?: boolean }) => {
+ipcMain.handle('settings:set', (_e, patch: { updateCheck?: boolean; appChannel?: unknown; resetAfterMaskrom?: boolean }) => {
   const s = loadSettings();
   saveSettings({
     ...s,
     ...(typeof patch.updateCheck === 'boolean' ? { updateCheck: patch.updateCheck } : {}),
-    ...(typeof patch.betaUpdates === 'boolean' ? { betaUpdates: patch.betaUpdates } : {}),
+    // Another tier: the last offer was for the old one.
+    ...(isChannel(patch.appChannel) ? { appChannel: patch.appChannel, ...(patch.appChannel !== s.appChannel ? { knownRelease: null, lastUpdateCheck: 0 } : {}) } : {}),
     ...(typeof patch.resetAfterMaskrom === 'boolean' ? { resetAfterMaskrom: patch.resetAfterMaskrom } : {}),
   });
 });
+
 ipcMain.handle('cache:info', () => cacheInfo(app.getPath('userData')));
 ipcMain.handle('cache:clear', () => {
   const data = app.getPath('userData');

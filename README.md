@@ -95,11 +95,13 @@ brew install --cask gahingwoo/tap/roxora-imager
 ```
 
 The app looks for a newer version once a day and offers to install it
-(Settings has "Check now" and the switch to turn the check off). Normal
-releases are offered to everyone. Beta versions are the pre-releases on
-GitHub, with a version such as 0.1.5-beta.1; they are offered only when
-"Also offer beta versions" is turned on in Settings, and
-`install.sh` installs one only with `BETA=1`. Updates are installed inside
+(Settings has "Check now" and the switch to turn the check off). Which
+releases it offers is the release tier in Settings: **Stable** (the
+default) the normal releases; **Prerelease** the betas too, the
+pre-releases on GitHub with a version such as 0.1.5-beta.1; **CI** the
+rolling `ci` release, an untested build of main that the Release workflow
+replaces on every successful build. `install.sh` installs a beta only with
+`BETA=1`, and never the `ci` release. Updates are installed inside
 the app after you confirm; how depends on how the app was installed (on
 macOS through Homebrew or by replacing the app from the new DMG):
 [docs/install.md](docs/install.md#updates).

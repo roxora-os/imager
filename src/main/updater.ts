@@ -2,8 +2,9 @@
 // user asks.
 //
 // The check runs at most once a day, and not at all when turned off in the
-// settings. Normal releases are offered to everyone; betas (pre-releases on
-// GitHub) only when the setting asks for them. Nothing is downloaded or
+// settings. Which releases are offered is the tier chosen in Settings
+// (shared/channel.ts): Stable the newest normal release, Prerelease betas
+// too, CI the rolling build of main when it is from another commit. Nothing is downloaded or
 // installed before the user presses Update and confirms. How the update
 // goes depends on how this copy was installed (shared/update.ts,
 // installKind): a Homebrew cask is upgraded by running brew, the app from a
@@ -20,10 +21,11 @@ import { existsSync, mkdtempSync, readdirSync, realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import {
-  APT_COMMAND, APT_PACKAGE, aptRepoCarries, assetSha256, BREW_COMMAND, brewCaskOwns, checkDue, installKind, judgeReleases,
-  newestRelease, pickAsset,
+  APT_COMMAND, APT_PACKAGE, aptRepoCarries, assetSha256, BREW_COMMAND, brewCaskOwns, checkDue, installKind, judgeChannel,
+  pickAsset,
   type AppRelease, type InstallKind, type ReleaseAsset, type UpdateCheck, type UpdateResult,
 } from '../shared/update';
+import { pickRelease, type Channel } from '../shared/channel';
 import { loadSettings, saveSettings } from './settings';
 import { brewUpgrade, findBrew, NotInPlace, removeOldBundle, run, swapAppFromDmg } from './update-mac';
 import {
@@ -91,11 +93,15 @@ function fakeCheck(): UpdateCheck {
 /** The release the last check offered, with the file to download. */
 let offered: { release: AppRelease; asset: ReleaseAsset | null; kind: InstallKind } | null = null;
 
-function judge(list: AppRelease[], beta: boolean): UpdateCheck {
+declare const __BUILD_COMMIT__: string;
+/** The commit this copy was built from (scripts/build.mjs), for the CI tier. */
+const BUILD_COMMIT = typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : 'unknown';
+
+function judge(list: AppRelease[], channel: Channel): UpdateCheck {
   const { kind, arch } = detectInstall();
-  const res = judgeReleases(app.getVersion(), list, { beta, kind, arch });
+  const res = judgeChannel(app.getVersion(), BUILD_COMMIT, list, { channel, kind, arch });
   if (res.state === 'newer') {
-    const release = newestRelease(list, { beta })!;
+    const release = channel === 'ci' ? pickRelease(list, 'ci')! : pickRelease(list.filter((r) => r.tag_name !== 'ci'), channel)!;
     offered = { release, asset: pickAsset(release.assets, kind, arch), kind };
   }
   return res;
@@ -111,7 +117,7 @@ export async function checkForUpdate(force = false): Promise<UpdateCheck | null>
   const s = loadSettings();
   const now = Date.now();
   const remembered = () => {
-    const r = s.knownRelease ? judge([s.knownRelease], s.betaUpdates) : null;
+    const r = s.knownRelease ? judge([s.knownRelease], s.appChannel) : null;
     return r?.state === 'newer' ? r : null;
   };
   if (!force && !checkDue(s.updateCheck, s.lastUpdateCheck, now)) return s.updateCheck ? remembered() : null;
@@ -122,10 +128,10 @@ export async function checkForUpdate(force = false): Promise<UpdateCheck | null>
     // Try again at the next start rather than in a day.
     return force ? { state: 'error', message: `Could not reach GitHub (${(e as Error).message}).` } : remembered();
   }
-  const res = judge(list, s.betaUpdates);
+  const res = judge(list, s.appChannel);
   // Only what the next start needs: the release and the one file for this install.
   const keep = res.state === 'newer' && offered ? {
-    tag_name: offered.release.tag_name, html_url: offered.release.html_url, prerelease: offered.release.prerelease === true,
+    tag_name: offered.release.tag_name, name: offered.release.name ?? null, html_url: offered.release.html_url, prerelease: offered.release.prerelease === true,
     body: (offered.release.body ?? '').slice(0, 2000), assets: offered.asset ? [offered.asset] : [],
   } : null;
   saveSettings({ ...loadSettings(), lastUpdateCheck: now, knownRelease: keep });

@@ -2,6 +2,7 @@
 import type { CatalogImage } from './catalog';
 import type { HiddenDrive, Target } from './targets';
 import type { UpdateCheck, UpdateResult } from './update';
+import type { Channel } from './channel';
 import type { CacheInfo, ClearResult } from '../main/cache';
 
 export type CatalogResult =
@@ -126,8 +127,8 @@ export interface ImagerApi {
   releaseMaskrom(token: string): Promise<void>;
   onUsbChoice(cb: (choices: { deviceId: string; productName?: string; productId: number }[]) => void): () => void;
   answerUsbChoice(deviceId: string): void;
-  getSettings(): Promise<{ updateCheck: boolean; betaUpdates?: boolean; resetAfterMaskrom: boolean }>;
-  setSettings(s: { updateCheck?: boolean; betaUpdates?: boolean; resetAfterMaskrom?: boolean }): Promise<void>;
+  getSettings(): Promise<{ updateCheck: boolean; appChannel?: Channel; resetAfterMaskrom: boolean }>;
+  setSettings(s: { updateCheck?: boolean; appChannel?: Channel; resetAfterMaskrom?: boolean }): Promise<void>;
   /** Desktop only: what the downloads and the Maskrom loaders take in the user data folder. */
   cacheInfo?(): Promise<CacheInfo>;
   /** Desktop only: delete them; refused while a write runs. */

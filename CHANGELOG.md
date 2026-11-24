@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Release tiers for the app's own updates, in Settings: Stable, Prerelease
+  and CI, in place of the beta switch (beta on becomes Prerelease). CI is
+  the rolling `ci` release, an untested build of main that the Release
+  workflow replaces on every successful build, offered when it comes from
+  another commit than the running copy. install.sh never installs it.
 - About Roxora Imager, from Settings: the version with the commit and date
   it was built from, the PatternFly it uses, what it connects to (GitHub,
   and Rockchip's rkbin once; no analytics or telemetry), where it keeps
