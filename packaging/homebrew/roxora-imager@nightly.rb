@@ -14,7 +14,7 @@ cask "roxora-imager@nightly" do
     skip "Rolling build of main, replaced on every successful build"
   end
 
-  conflicts_with cask: ["roxora-imager"]
+  conflicts_with cask: "roxora-imager"
   depends_on :macos
 
   app "Roxora Imager.app"

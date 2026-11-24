@@ -18,7 +18,7 @@ const common = (livecheck, conflicts) => `  name "Roxora Imager"
   desc "Download, check and write Roxora images for Rockchip boards"
   homepage "https://roxora-os.github.io/roxora-imager/"
 ${livecheck}
-  conflicts_with cask: [${conflicts.map((c) => `"${c}"`).join(', ')}]
+  conflicts_with cask: ${conflicts.length === 1 ? `"${conflicts[0]}"` : `[${conflicts.map((c) => `"${c}"`).join(', ')}]`}
   depends_on :macos
 
   app "Roxora Imager.app"
