@@ -2,7 +2,7 @@
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { ImagerApi, JobProgress } from '../shared/ipc';
 
-const info = ipcRenderer.sendSync('app:info') as { platform: string; version: string; devSample: boolean };
+const info = ipcRenderer.sendSync('app:info') as { platform: string; version: string; devSample: boolean; dataDir: string };
 
 const api: ImagerApi = {
   ...info,

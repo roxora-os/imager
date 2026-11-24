@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ActionList, ActionListGroup, ActionListItem, Alert, AlertActionCloseButton, AlertActionLink, Button, CodeBlock, CodeBlockAction, CodeBlockCode, Content, DescriptionList,
   DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, EmptyState, EmptyStateActions, EmptyStateBody,
@@ -12,6 +13,7 @@ import {
   useWizardContext,
 } from '@patternfly/react-core';
 import { CogIcon } from '@patternfly/react-icons/dist/esm/icons/cog-icon';
+import { TimesIcon } from '@patternfly/react-icons/dist/esm/icons/times-icon';
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table';
 import {
   compareImages, flavorWords, groupByBoard, splitByRelease, type Board, type CatalogImage, type CatalogRelease, type ImageSortKey,
@@ -931,8 +933,10 @@ function checkWords(c: UpdateCheck): string {
 
 type AppSettings = { updateCheck: boolean; betaUpdates?: boolean; resetAfterMaskrom: boolean };
 
-function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writing }: {
+function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writing, onAbout }: {
   open: boolean; onClose: () => void; theme: Theme; setTheme: (t: Theme) => void;
+  /** Open About Roxora Imager. */
+  onAbout: () => void;
   /** A check found a newer version. */
   onOffer: (o: UpdateOffer) => void;
   /** The user wants it. */
@@ -1031,14 +1035,13 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
                 </ToggleGroup>
               </FormGroup>
             </FormSection>
-            <FormSection title="About" titleElement="h3">
-              <DescriptionList isCompact isHorizontal>
-                <DescriptionListGroup><DescriptionListTerm>Version</DescriptionListTerm><DescriptionListDescription>{api.version}</DescriptionListDescription></DescriptionListGroup>
-                <DescriptionListGroup><DescriptionListTerm>License</DescriptionListTerm><DescriptionListDescription>GPL-2.0</DescriptionListDescription></DescriptionListGroup>
-                <DescriptionListGroup><DescriptionListTerm>Source</DescriptionListTerm><DescriptionListDescription>
-                  <Button variant="link" isInline component="a" href="https://github.com/roxora-os/imager" target="_blank">github.com/roxora-os/imager</Button>
-                </DescriptionListDescription></DescriptionListGroup>
-              </DescriptionList>
+            <FormSection title="Version" titleElement="h3">
+              <FormGroup fieldId="about-open">
+                <Content component="p">{api.version}</Content>
+                <Flex><FlexItem>
+                  <Button id="about-open" variant="link" isInline onClick={onAbout}>About Roxora Imager</Button>
+                </FlexItem></Flex>
+              </FormGroup>
             </FormSection>
           </Form>
         )}
@@ -1065,6 +1068,69 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
       </Modal>
     )}
     </>
+  );
+}
+
+declare const __BUILD_COMMIT__: string;
+declare const __BUILD_DATE__: string;
+declare const __PATTERNFLY_VERSION__: string;
+const BUILD = {
+  commit: typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : 'unknown',
+  date: typeof __BUILD_DATE__ === 'string' ? __BUILD_DATE__ : '',
+  patternfly: typeof __PATTERNFLY_VERSION__ === 'string' ? __PATTERNFLY_VERSION__ : '',
+};
+
+/**
+ * About Roxora Imager: PatternFly's about modal box with the facts of this
+ * build. Every row has to be true for the build that shows it.
+ */
+function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const close = useRef<HTMLButtonElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    close.current?.focus();
+    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', key);
+    return () => window.removeEventListener('keydown', key);
+  }, [open, onClose]);
+  if (!open) return null;
+  const link = (href: string, text: string) => <a href={href} target="_blank" rel="noreferrer">{text}</a>;
+  const rows: Array<[string, React.ReactNode]> = [
+    ['Version', `${api.version} (${BUILD.commit}${BUILD.date ? `, ${BUILD.date}` : ''})`],
+    ['Design system', BUILD.patternfly ? `PatternFly ${BUILD.patternfly}` : 'PatternFly'],
+    ...(WEB ? [] : [
+      ['Network', `GitHub (the Roxora releases and this app's updates), and ${RKBIN_HOST} once for Rockchip's rkbin. No analytics or telemetry.`],
+      ['Kept on your device', <>Settings and downloads, in <span className="selectable">{api.dataDir}</span>; Settings has Clear cache</>],
+    ] as Array<[string, React.ReactNode]>),
+    ['Licence', 'GPL-2.0-only'],
+    ['Source', link('https://github.com/roxora-os/imager', 'github.com/roxora-os/imager')],
+  ];
+  // On the document body, as PatternFly's Modal does, so the backdrop covers the masthead too.
+  return createPortal(
+    <div className="pf-v6-c-backdrop about-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="pf-v6-l-bullseye">
+        <div className="pf-v6-c-about-modal-box" role="dialog" aria-modal="true" aria-labelledby="about-title">
+          <div className="pf-v6-c-about-modal-box__brand"><img src="resources/roxora-mark.svg" alt="" className="about-mark" /></div>
+          <div className="pf-v6-c-about-modal-box__close">
+            <Button ref={close} variant="plain" aria-label="Close About Roxora Imager" icon={<TimesIcon />} onClick={onClose} />
+          </div>
+          <div className="pf-v6-c-about-modal-box__header">
+            <h1 className="pf-v6-c-title pf-m-2xl" id="about-title">About Roxora Imager</h1>
+          </div>
+          <div className="pf-v6-c-about-modal-box__content">
+            <dl className="pf-v6-c-description-list pf-m-horizontal">
+              {rows.map(([k, v]) => (
+                <div className="pf-v6-c-description-list__group" key={k}>
+                  <dt className="pf-v6-c-description-list__term"><span className="pf-v6-c-description-list__text">{k}</span></dt>
+                  <dd className="pf-v6-c-description-list__description"><div className="pf-v6-c-description-list__text">{v}</div></dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -1105,6 +1171,7 @@ export function App() {
   const [askInternal, setAskInternal] = useState<Target | null>(null);
   const [run, setRun] = useState<Run | null>(null);
   const [settings, setSettings] = useState(false);
+  const [about, setAbout] = useState(false);
   const [offer, setOffer] = useState<UpdateOffer | null>(null);
   const [updating, setUpdating] = useState(false);
   // Closing the notice hides that version for good; Settings still offers it.
@@ -1638,7 +1705,9 @@ export function App() {
       </Modal>
 
       <SettingsModal open={settings} onClose={() => setSettings(false)} theme={theme} setTheme={setTheme}
-        onOffer={setOffer} onUpdate={() => { setSettings(false); setUpdating(true); }} writing={!!run && !run.result} />
+        onOffer={setOffer} onUpdate={() => { setSettings(false); setUpdating(true); }} writing={!!run && !run.result}
+        onAbout={() => { setSettings(false); setAbout(true); }} />
+      <AboutModal open={about} onClose={() => setAbout(false)} />
       <UpdateModal offer={updating && !(run && !run.result) ? offer : null} onClose={() => setUpdating(false)} />
     </Shell>
   );

@@ -67,6 +67,8 @@ export interface ImagerApi {
   platform: string;
   version: string;
   devSample: boolean;
+  /** Desktop only: the user data folder (settings, downloads, loaders), for About. */
+  dataDir?: string;
   loadCatalog(opts: { sample: boolean }): Promise<CatalogResult>;
   /** `internal`: also offer built-in disks that hold nothing in use (Linux; "Show internal disks"). */
   listDrives(minSize: number, internal?: boolean): Promise<{ targets: Target[]; hidden: HiddenDrive[] }>;

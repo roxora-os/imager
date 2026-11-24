@@ -3,6 +3,7 @@
 // rkdeveloptool from vendor/rkdeveloptool-wasm/ (scripts/build-wasm.sh).
 import { build } from 'esbuild';
 import { cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import { buildDefines } from './lib/build-info.mjs';
 
 const prod = process.env.NODE_ENV === 'production';
 rmSync('build', { recursive: true, force: true });
@@ -20,7 +21,7 @@ await build({
   ...web, entryPoints: { app: 'src/renderer/main.tsx' }, outdir: 'build/renderer',
   loader: { '.woff2': 'file', '.woff': 'file', '.ttf': 'file', '.svg': 'file', '.png': 'file', '.jpg': 'file' },
   assetNames: 'assets/[name]-[hash]', jsx: 'automatic',
-  define: { 'process.env.NODE_ENV': JSON.stringify(prod ? 'production' : 'development') },
+  define: { 'process.env.NODE_ENV': JSON.stringify(prod ? 'production' : 'development'), ...buildDefines() },
 });
 await build({ ...web, entryPoints: { 'maskrom-worker': 'src/maskrom/worker.ts' }, outdir: 'build/renderer' });
 cpSync('src/renderer/index.html', 'build/renderer/index.html');

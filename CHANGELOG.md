@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- About Roxora Imager, from Settings: the version with the commit and date
+  it was built from, the PatternFly it uses, what it connects to (GitHub,
+  and Rockchip's rkbin once; no analytics or telemetry), where it keeps
+  settings and downloads, the licence and the source. Settings keeps the
+  version.
 - Settings shows how much the downloaded images and the Maskrom loaders
   take, and has Clear cache: a dialog lists what is deleted and the folder,
   and the freed size is shown. Both come back when needed. Not while a

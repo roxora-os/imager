@@ -1,5 +1,5 @@
 // Scrolling and text selection in the real app window, at small sizes: in
-// every step and dialog exactly one element scrolls, a mouse wheel over the
+// every step and dialog (Settings, About) exactly one element scrolls, a mouse wheel over the
 // content moves it, and the page itself never does. Ctrl+A outside a text
 // field selects nothing; a text field's text can be selected. Runs hidden,
 // with the sample catalog and the made-up drive list of scripts/shots.mjs.
@@ -90,7 +90,15 @@ for (const [w, h] of [[900, 600], [1024, 700], [720, 480]]) {
   await page.waitForSelector('.pf-v6-c-modal-box');
   await page.waitForTimeout(300);
   await check(page, tag('settings'), [w / 2, h / 2], '.pf-v6-c-modal-box');
+  // About, on the document body: its values (the data folder) can be copied.
+  await page.click('#about-open');
+  await page.waitForSelector('#about-title');
+  await page.waitForTimeout(300);
+  await check(page, tag('about'), [w / 2, h / 2], '.about-backdrop');
+  const aboutSel = await page.evaluate(() => getComputedStyle(document.querySelector('.about-backdrop .pf-v6-c-description-list__description')).userSelect);
+  if (aboutSel === 'none') failures.push(`${tag('about')}: the About values cannot be selected`);
   await page.keyboard.press('Escape');
+  if (await page.$('#about-title')) failures.push(`${tag('about')}: Escape did not close About`);
   await app.close();
 }
 if (failures.length) { console.error(failures.join('\n')); process.exit(1); }

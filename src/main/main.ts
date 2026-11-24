@@ -469,7 +469,7 @@ ipcMain.handle('open-external', (_e, url: string) => {
   if (/^https:\/\/(github\.com\/roxora-os\/|roxora-os\.github\.io\/|zadig\.akeo\.ie\/)/.test(url)) return shell.openExternal(url);
 });
 ipcMain.on('app:info', (e) => {
-  e.returnValue = { platform: process.platform, version: app.getVersion(), devSample: DEV_SAMPLE };
+  e.returnValue = { platform: process.platform, version: app.getVersion(), devSample: DEV_SAMPLE, dataDir: app.getPath('userData') };
 });
 ipcMain.on('theme', (_e, t: 'light' | 'dark') => { nativeTheme.themeSource = t; });
 
