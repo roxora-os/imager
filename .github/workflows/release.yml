@@ -83,10 +83,19 @@ jobs:
           V=$(node -p "require('./package.json').version")
           case "$GITHUB_REF" in refs/tags/v*) V="${GITHUB_REF_NAME#v}" ;; esac
           node scripts/metainfo-release.mjs "$V" "$(git log -1 --format=%cs)"
+      # A mirror that hangs fails the step in minutes, and is tried again,
+      # instead of holding the job.
+      - name: AppStream and desktop file tools
+        timeout-minutes: 12
+        run: |
+          APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+          for i in 1 2 3; do
+            sudo apt-get $APT update -qq && sudo apt-get $APT install -y -qq appstream desktop-file-utils xvfb && exit 0
+            echo "apt failed (try $i); again in 20 s"; sleep 20
+          done
+          exit 1
       - name: Check the AppStream metadata
         run: |
-          sudo apt-get update
-          sudo apt-get install -y appstream desktop-file-utils xvfb
           appstreamcli validate --no-net packaging/io.github.roxora_os.imager.metainfo.xml
           desktop-file-validate packaging/io.github.roxora_os.imager.desktop
       - name: Package deb and rpm
@@ -121,8 +130,9 @@ jobs:
           cat /tmp/appimage.log
           [ "$rc" = 124 ] || { echo "FAIL: AppImage exited with $rc"; exit 1; }
       - name: Smoke-test the .deb on this runner
+        timeout-minutes: 15
         run: |
-          sudo apt-get install -y ./dist/*.deb
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 install -y ./dist/*.deb
           test -u /opt/roxora-imager/chrome-sandbox
           test -f /usr/lib/udev/rules.d/70-roxora-imager.rules
           for f in /usr/share/icons/hicolor/{16x16,24x24,32x32,48x48,64x64,128x128,256x256,512x512}/apps/io.github.roxora_os.imager.png \
@@ -141,9 +151,10 @@ jobs:
         if: matrix.arch == 'x86_64'
         run: |
           docker run --rm -v "$PWD/dist:/dist:ro" debian:bookworm-slim bash -euo pipefail -c '
-            apt-get update -qq
+            APT="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
+            apt-get $APT update -qq
             # Only what an Electron app may expect from the host.
-            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+            DEBIAN_FRONTEND=noninteractive apt-get $APT install -y -qq --no-install-recommends \
               xvfb xauth libgtk-3-0 libnss3 libasound2 libgbm1 libxss1 libxtst6 > /dev/null
             cp /dist/*.AppImage /tmp/app.AppImage
             chmod +x /tmp/app.AppImage
