@@ -31,7 +31,9 @@ the first time.
 
 ## Windows
 
-1. Run `roxora-imager-<version>-windows-x64-setup.exe`.
+1. Run `roxora-imager-<version>-windows-x64-setup.exe`, or on a Windows
+   on Arm computer `roxora-imager-<version>-windows-arm64-setup.exe` (a
+   native arm64 build; the x64 one also runs there, emulated).
 2. Windows SmartScreen says "Windows protected your PC". Click
    **More info**, then **Run anyway**.
 
@@ -131,7 +133,7 @@ cancelled. What happens then depends on how the app was installed:
 | --- | --- |
 | macOS, Homebrew cask | The app runs Homebrew for you, as your user: `brew update`, then `brew upgrade --cask roxora-imager`. Its output is in the dialog. Then **Restart now**. If Homebrew is not found or fails, the dialog shows its error and the command to copy. Homebrew only has a new version once its tap lists it, which can be a little after the release. |
 | macOS, DMG or install.sh | The DMG for this Mac's CPU goes to the Downloads folder, is mounted out of sight, and its app is copied in place of the running one (into `~/Applications` if the app's folder cannot be written). Then **Restart now**. The old app is kept until the new one is in place. If that is not possible the DMG is opened and you drag the app yourself. |
-| Windows, installer | The setup program is downloaded and started, and Roxora Imager closes so that it can be replaced. |
+| Windows, installer | The setup program for this computer's CPU is downloaded and started, and Roxora Imager closes so that it can be replaced. On a Windows on Arm computer that is the arm64 one, also when the x64 build was installed. |
 | Linux, AppImage | The new AppImage is downloaded into the same folder and put in place of the old file in one step. Restart the app. |
 | Linux, .deb or .rpm | The package is downloaded and installed with apt-get, dnf or zypper through pkexec, which asks for your password. If that is not possible the app shows the command to run in a terminal. Restart the app. |
 | Linux, .deb from an apt repository (Roxora's desktop images) | Not updated by the app: the system's software updates bring the new version once the repository has it (Roxora's within an hour of the release). The notice still says the version is out, and the dialog shows `sudo apt update && sudo apt install --only-upgrade roxora-imager` to update at once. The app tells this from a .deb installed by hand by `apt-cache policy roxora-imager`, which names the repository. |

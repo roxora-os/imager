@@ -1,8 +1,8 @@
 name: Release
 
-# Packages for Windows (x64), macOS (arm64 and x86_64) and Linux (AppImage,
-# .deb and .rpm for x86_64 and arm64), attached to a GitHub release on a
-# version tag. The layout follows gahingwoo/RKDevelopTool-GUI's release.yml:
+# Packages for Windows (x64 and arm64), macOS (arm64 and x86_64) and Linux
+# (AppImage, .deb and .rpm for x86_64 and arm64), attached to a GitHub
+# release on a version tag. The layout follows gahingwoo/RKDevelopTool-GUI's release.yml:
 # unsigned unless signing secrets exist, the scarce Intel macOS runner never
 # blocks the release, and the notes come from CHANGELOG.md.
 on:
@@ -275,9 +275,17 @@ jobs:
           name: macos-${{ matrix.arch }}
           path: dist/*.dmg
   windows:
-    name: Windows x64
+    name: Windows ${{ matrix.arch }}
     needs: wasm
-    runs-on: windows-2022
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x64, runner: windows-2022, unpacked: win-unpacked }
+          # Windows on Arm, native: the writer and the native addons are
+          # built for arm64 on an arm64 runner.
+          - { arch: arm64, runner: windows-11-arm, unpacked: win-arm64-unpacked }
     defaults:
       run:
         shell: bash
@@ -287,7 +295,42 @@ jobs:
         with:
           node-version: 22
           cache: npm
-      - run: npm ci
+      - name: Dependencies
+        if: matrix.arch == 'x64'
+        run: npm ci
+      # windows-11-arm has only Visual Studio 2026, which the node-gyp 10 that
+      # npm and Electron bring does not know ("unknown version"); node-gyp
+      # 13.1 does. So: install without scripts, then build every native addon
+      # that has no win32-arm64 prebuild with it, natively on arm64, and run
+      # the other install scripts that matter by hand.
+      - name: Dependencies, native addons built for arm64 with node-gyp 13.1
+        if: matrix.arch == 'arm64'
+        run: |
+          set -e
+          npm ci --ignore-scripts
+          npm install -g node-gyp@13.1.0
+          GYP="$(npm root -g)/node-gyp/bin/node-gyp.js"
+          node "$GYP" --version
+          # lzma-native ships liblzma.dll for x64 and x86 only: an arm64 one from vcpkg.
+          /c/vcpkg/vcpkg.exe install liblzma:arm64-windows
+          ls /c/vcpkg/installed/arm64-windows/bin/
+          node scripts/lzma-native-win-arm64.mjs "$(ls /c/vcpkg/installed/arm64-windows/bin/*lzma*.dll | head -1)"
+          for d in drivelist mountutils lzma-native @ronomon/direct-io; do
+            echo "::group::$d"
+            (cd "node_modules/$d" && node "$GYP" rebuild --arch=arm64)
+            echo "::endgroup::"
+          done
+          # electron-builder leaves lzma-native's build/ out of the package (its
+          # prebuilds/ go in), so the arm64 build goes where node-gyp-build
+          # looks first, with the liblzma.dll it links beside it.
+          mkdir -p node_modules/lzma-native/prebuilds/win32-arm64
+          cp node_modules/lzma-native/build/Release/lzma_native.node node_modules/lzma-native/prebuilds/win32-arm64/node.napi.node
+          cp node_modules/lzma-native/deps/bin_arm64/liblzma.dll node_modules/lzma-native/prebuilds/win32-arm64/
+          # Optional for etcher-sdk (USB boot of other boards): built if it can be.
+          (cd node_modules/winusb-driver-generator && node "$GYP" rebuild --arch=arm64) || echo "winusb-driver-generator not built (optional)"
+          node node_modules/esbuild/install.js
+          if [ -f node_modules/@yao-pkg/pkg/node_modules/esbuild/install.js ]; then node node_modules/@yao-pkg/pkg/node_modules/esbuild/install.js; fi
+          (cd node_modules/electron-winstaller && node ./script/select-7z-arch.js)
       - name: Writer (Node.js packed with pkg, as Etcher's etcher-util)
         run: npm run writer
       - uses: actions/download-artifact@v4
@@ -298,29 +341,33 @@ jobs:
         env:
           NODE_ENV: production
       - run: npm run icons
+      - name: Native addons for windows-${{ matrix.arch }} only
+        run: node scripts/native-for-target.mjs ${{ matrix.arch }}
       # Unsigned: SmartScreen will warn. See docs/install.md.
       - name: Installer and zip
-        run: npx electron-builder --win nsis zip --x64 --publish never
+        run: npx electron-builder --win nsis zip --${{ matrix.arch }} --publish never
       - name: Icon and no firmware blobs in the app
-        run: node scripts/check-package.mjs dist/win-unpacked
+        run: node scripts/check-package.mjs dist/${{ matrix.unpacked }}
+      - name: Every native binary in the package is for ${{ matrix.arch }}
+        run: node scripts/check-native-arch.mjs dist/${{ matrix.unpacked }} ${{ matrix.arch }}
       - name: Name the zip
         run: |
           V=$(node -p "require('./package.json').version")
-          mv dist/roxora-imager-$V-win-x64.zip dist/roxora-imager-$V-windows-x64.zip
+          mv dist/roxora-imager-$V-win-${{ matrix.arch }}.zip dist/roxora-imager-$V-windows-${{ matrix.arch }}.zip
           ls -l dist
       - name: Smoke-test the app
         run: |
           set +e
-          timeout 30 "dist/win-unpacked/roxora-imager.exe" > app.log 2>&1
+          timeout 30 "dist/${{ matrix.unpacked }}/roxora-imager.exe" > app.log 2>&1
           rc=$?
           cat app.log
           [ "$rc" = 124 ] || { echo "FAIL: exited with $rc"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
-          name: windows-x64
+          name: windows-${{ matrix.arch }}
           path: |
             dist/*-setup.exe
-            dist/*-windows-x64.zip
+            dist/*-windows-${{ matrix.arch }}.zip
 
   release:
     name: Publish the release

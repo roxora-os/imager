@@ -79,8 +79,8 @@ stand-ins).
 
 ## Install
 
-Windows (x64), macOS (Apple silicon and Intel) and Linux (AppImage, .deb,
-.rpm; x86_64 and arm64) packages are attached to the
+Windows (x64 and arm64), macOS (Apple silicon and Intel) and Linux
+(AppImage, .deb, .rpm; x86_64 and arm64) packages are attached to the
 [releases](https://github.com/roxora-os/imager/releases). On macOS and Linux:
 
 ```sh

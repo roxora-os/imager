@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Windows on Arm: a native arm64 installer and zip next to the x64 ones.
+  The in-app update installs the arm64 build on an arm64 computer.
 - Destination: a third choice, Save as an image file, saves the
   uncompressed .img in a folder you pick in the system's save dialog, for
   Ventoy and similar boot-from-file devices or a virtual machine. A release

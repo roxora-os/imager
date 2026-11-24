@@ -11,6 +11,7 @@ const assetsOf = (v: string) => [
   asset(`roxora-imager-${v}-linux-arm64.AppImage`), asset(`roxora-imager-${v}-linux-x86_64.AppImage`),
   asset(`roxora-imager-${v}-macos-arm64.dmg`), asset(`roxora-imager-${v}-macos-x86_64.dmg`),
   asset(`roxora-imager-${v}-windows-x64-setup.exe`), asset(`roxora-imager-${v}-windows-x64.zip`),
+  asset(`roxora-imager-${v}-windows-arm64-setup.exe`), asset(`roxora-imager-${v}-windows-arm64.zip`),
   asset(`roxora-imager_${v}_amd64.deb`), asset(`roxora-imager_${v}_arm64.deb`), asset('SHA256SUMS'),
 ];
 const rel = (v: string, over: Partial<AppRelease> = {}): AppRelease => ({
@@ -197,6 +198,7 @@ describe('the file for this install', () => {
     expect(name('dmg', 'arm64')).toBe('roxora-imager-0.1.4-macos-arm64.dmg');
     expect(name('dmg', 'x64')).toBe('roxora-imager-0.1.4-macos-x86_64.dmg');
     expect(name('windows', 'x64')).toBe('roxora-imager-0.1.4-windows-x64-setup.exe');
+    expect(name('windows', 'arm64')).toBe('roxora-imager-0.1.4-windows-arm64-setup.exe');
     expect(name('appimage', 'x64')).toBe('roxora-imager-0.1.4-linux-x86_64.AppImage');
     expect(name('appimage', 'arm64')).toBe('roxora-imager-0.1.4-linux-arm64.AppImage');
     expect(name('deb', 'x64')).toBe('roxora-imager_0.1.4_amd64.deb');
@@ -208,7 +210,8 @@ describe('the file for this install', () => {
     expect(pickAsset(a, 'brew', 'arm64')).toBeNull();
     expect(pickAsset(a, 'apt', 'arm64')).toBeNull();
     expect(pickAsset(a, 'none', 'x64')).toBeNull();
-    expect(pickAsset(a, 'windows', 'arm64')).toBeNull();
+    // A release from before the arm64 Windows build: nothing for arm64 Windows.
+    expect(pickAsset(a.filter((x) => !x.name.includes('windows-arm64')), 'windows', 'arm64')).toBeNull();
     expect(pickAsset(a, 'appimage', 'ia32')).toBeNull();
     expect(pickAsset([asset('SHA256SUMS')], 'deb', 'x64')).toBeNull();
     expect(pickAsset(undefined, 'deb', 'x64')).toBeNull();
