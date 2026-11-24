@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Maskrom, eMMC: write a vendor's Rockchip update.img (a factory firmware
+  package): read and refused for another chip, its MD5 checked, then its
+  partition table, loader and partitions written as RKDevTool's Upgrade
+  Firmware does, and the first 32 MiB read back. Not yet tried on a board.
+- Maskrom, eMMC or the board's SD card: "Also clear the old backup
+  partition table at the end of the storage", off by default, zeroes the
+  last 33 sectors after a whole image so no tool finds a stale GPT there.
 - Homebrew: a `roxora-imager@nightly` cask for the CI builds next to
   `roxora-imager`, both written by `scripts/bump-cask.mjs`; a release opens
   the pull request to the tap. The in-app update knows which cask it came

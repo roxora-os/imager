@@ -10,6 +10,10 @@ images in two ways, or saves them as a file:
   compares it with the release.
 - **Board storage over USB (Maskrom).** Writes a board's eMMC or SPI NOR
   flash through its USB-C port, with the same read-back check.
+  On the eMMC it can also write a vendor's Rockchip `update.img` (a
+  factory firmware package) the way RKDevTool's Upgrade Firmware does, and
+  after a whole image it can clear the old backup partition table at the
+  end of the storage (off unless ticked). Desktop app only.
 - **Save as an image file.** Saves the uncompressed .img where you choose,
   for Ventoy and similar boot-from-file devices or a virtual machine. The
   download is checked as above, and the decompressed file against the
@@ -158,6 +162,16 @@ Safety rules:
 - A Maskrom write names the storage (eMMC or SPI NOR) and fails before
   writing anything if the board does not switch to it or the image does not
   fit.
+- An `update.img` (`src/maskrom/rkfw.ts`, from Maskrom Studio) is read
+  before anything is written: refused unless its header and its loader are
+  for RK3576, unless every partition image fits the place its parameter.txt
+  gives it, and when the MD5 the packer appended does not match. It is
+  then written as RKDevTool does: `gpt` with its parameter.txt, `ul` with
+  its loader, then `wl` of each partition at its sector. Everything written
+  in the first 32 MiB is read back and compared; past that only samples
+  are, and a sample that differs is reported, not counted as a failure,
+  because RK3576 loaders return filler for reads there. Not yet tried on a
+  board.
 
 ## Building
 

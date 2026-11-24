@@ -39,17 +39,35 @@ export interface FlashPlan {
   resetAfter: boolean;
   /** How long to wait for the board to come back after the loader, in ms. */
   reconnectTimeout?: number;
+  /**
+   * After the image, zero the last 33 sectors of the storage, where a GPT
+   * keeps its backup copy: a whole-disk image smaller than the storage
+   * leaves the old one there otherwise, and some tools then find a stale
+   * partition table. Only when the storage size is known and the image ends
+   * before them.
+   */
+  clearBackupGpt?: boolean;
+}
+
+/** GPT keeps a copy of itself in the last 33 sectors of the disk. */
+export const BACKUP_GPT_SECTORS = 33;
+
+/** Where the backup GPT starts on a storage of `capacity` bytes, or null when an image of `imageSize` reaches into it. */
+export function backupGptLba(capacity: number | null, imageSize: number): number | null {
+  if (capacity === null) return null;
+  const lba = Math.floor(capacity / SECTOR) - BACKUP_GPT_SECTORS;
+  return lba * SECTOR >= imageSize ? lba : null;
 }
 
 export type FlashResult =
-  | { ok: true; verified: 'match'; sha256: string; capacity: number | null }
-  | { ok: true; verified: 'skipped'; sha256: string; capacity: number | null }
+  | { ok: true; verified: 'match'; sha256: string; capacity: number | null; clearedBackupGpt?: boolean }
+  | { ok: true; verified: 'skipped'; sha256: string; capacity: number | null; clearedBackupGpt?: boolean }
   /**
    * Everything before verifiedBytes read back as written; from there on the
    * loader returned 0xCC filler (RK3576 loaders over USB), so the rest could
    * not be read back. On a ROCK 4D such a card booted normally.
    */
-  | { ok: true; verified: 'partial'; verifiedBytes: number; sha256: string; capacity: number | null }
+  | { ok: true; verified: 'partial'; verifiedBytes: number; sha256: string; capacity: number | null; clearedBackupGpt?: boolean }
   | { ok: false; reason: string; detail?: string };
 
 export class FlashError extends Error {}
@@ -145,6 +163,83 @@ function hashingSource(src: ByteSource, onRead: (end: number) => void): { source
   };
 }
 
+class Stopped extends Error {
+  constructor(public result: Extract<FlashResult, { ok: false }>) { super(result.reason); }
+}
+
+/**
+ * Find the board and have its loader run: db unless it already runs, then
+ * follow the board through its re-enumeration. Throws Stopped with the
+ * result to give when it cannot.
+ */
+async function bringUp(r: Runner, plan: { loader: Uint8Array; reconnectTimeout?: number }, hooks: Hooks): Promise<void> {
+  const stop = (reason: string, detail?: string): never => { throw new Stopped({ ok: false, reason, ...(detail ? { detail } : {}) }); };
+  hooks.stage('detect');
+  const mode = parseList((await r.run(['ld'])).lines);
+  if (mode === 'none') stop('No board in Maskrom mode was found.');
+  if (mode === 'several') stop('More than one Rockchip device is connected. Leave only the board you want to write.');
+
+  // The loader (usbplug) answers rfi; plain Maskrom cannot. On the RK3576
+  // ld says Maskrom either way, so a board whose loader still runs from an
+  // earlier attempt looks like a fresh one; db then fails on it.
+  const loaderRuns = async () => {
+    const probe = await r.run(['rfi']);
+    return probe.code === 0 && parseFlashSize(probe.lines) !== null;
+  };
+  if (mode === 'maskrom' && await loaderRuns()) {
+    hooks.log('The loader is already running on the board; not sending it again.');
+  } else if (mode === 'maskrom') {
+    hooks.stage('loader');
+    const loader = r.writeFile('loader.bin', plan.loader);
+    if (hooks.cancelled()) throw new FlashError('Cancelled.');
+    hooks.log(`$ rkdeveloptool db ${loader}`);
+    const db = await r.run(['db', loader]);
+    if (db.code !== 0) {
+      // db also fails when a loader is already running (RKDevelopTool-GUI
+      // checks the same way): go on if rfi answers.
+      if (!(await loaderRuns())) {
+        throw new FlashError(`Sending the loader failed (rkdeveloptool exit ${db.code}).`);
+      }
+    } else {
+      // The board resets and comes back with the loader (usbplug) running.
+      // The main process grants access to Rockchip devices, so it shows up
+      // again without a second device pick. Some SoCs come back as a Loader
+      // device; the RK3576 comes back still looking like Maskrom to `ld`
+      // (same descriptor), so then the loader is known to run when `rfi`
+      // gets an answer, which plain Maskrom cannot give (RKDevelopTool-GUI
+      // waits for rfi the same way).
+      hooks.stage('reconnect');
+      const deadline = (plan.reconnectTimeout ?? 20000);
+      let waited = 0;
+      let back = false;
+      await hooks.sleep(1000);
+      while (waited < deadline) {
+        if (hooks.cancelled()) throw new FlashError('Cancelled.');
+        const m = parseList((await r.run(['ld'])).lines);
+        if (m === 'loader') { back = true; break; }
+        if (m === 'maskrom' && await loaderRuns()) { back = true; break; }
+        await hooks.sleep(500);
+        waited += 500;
+      }
+      if (!back) {
+        stop('The board did not come back after the loader was sent.',
+          'Unplug the USB cable, put the board in Maskrom mode again and retry.');
+      }
+    }
+  }
+}
+
+/** Switch to the storage (cs) and read its size (rfi). Throws Stopped when it does not switch. */
+async function selectStorage(r: Runner, code: number, label: string, hooks: Hooks): Promise<number | null> {
+  hooks.stage('storage', label);
+  const cs = await r.run(['cs', String(code)]);
+  if (cs.code !== 0) {
+    throw new Stopped({ ok: false, reason: `The board did not switch to ${label}. Nothing was written.`, detail: cs.lines.join('\n') });
+  }
+  const rfi = await r.run(['rfi']);
+  return rfi.code === 0 ? parseFlashSize(rfi.lines) : null;
+}
+
 export async function flash(r: Runner, plan: FlashPlan, hooks: Hooks): Promise<FlashResult> {
   const step = async (stage: Stage, args: string[], what: string) => {
     if (hooks.cancelled()) throw new FlashError('Cancelled.');
@@ -154,68 +249,8 @@ export async function flash(r: Runner, plan: FlashPlan, hooks: Hooks): Promise<F
     return res.lines;
   };
   try {
-    hooks.stage('detect');
-    const mode = parseList((await r.run(['ld'])).lines);
-    if (mode === 'none') return { ok: false, reason: 'No board in Maskrom mode was found.' };
-    if (mode === 'several') return { ok: false, reason: 'More than one Rockchip device is connected. Leave only the board you want to write.' };
-
-    // The loader (usbplug) answers rfi; plain Maskrom cannot. On the RK3576
-    // ld says Maskrom either way, so a board whose loader still runs from an
-    // earlier attempt looks like a fresh one; db then fails on it.
-    const loaderRuns = async () => {
-      const probe = await r.run(['rfi']);
-      return probe.code === 0 && parseFlashSize(probe.lines) !== null;
-    };
-    if (mode === 'maskrom' && await loaderRuns()) {
-      hooks.log('The loader is already running on the board; not sending it again.');
-    } else if (mode === 'maskrom') {
-      hooks.stage('loader');
-      const loader = r.writeFile('loader.bin', plan.loader);
-      if (hooks.cancelled()) throw new FlashError('Cancelled.');
-      hooks.log(`$ rkdeveloptool db ${loader}`);
-      const db = await r.run(['db', loader]);
-      if (db.code !== 0) {
-        // db also fails when a loader is already running (RKDevelopTool-GUI
-        // checks the same way): go on if rfi answers.
-        if (!(await loaderRuns())) {
-          throw new FlashError(`Sending the loader failed (rkdeveloptool exit ${db.code}).`);
-        }
-      } else {
-        // The board resets and comes back with the loader (usbplug) running.
-        // The main process grants access to Rockchip devices, so it shows up
-        // again without a second device pick. Some SoCs come back as a Loader
-        // device; the RK3576 comes back still looking like Maskrom to `ld`
-        // (same descriptor), so then the loader is known to run when `rfi`
-        // gets an answer, which plain Maskrom cannot give (RKDevelopTool-GUI
-        // waits for rfi the same way).
-        hooks.stage('reconnect');
-        const deadline = (plan.reconnectTimeout ?? 20000);
-        let waited = 0;
-        let back = false;
-        await hooks.sleep(1000);
-        while (waited < deadline) {
-          if (hooks.cancelled()) throw new FlashError('Cancelled.');
-          const m = parseList((await r.run(['ld'])).lines);
-          if (m === 'loader') { back = true; break; }
-          if (m === 'maskrom' && await loaderRuns()) { back = true; break; }
-          await hooks.sleep(500);
-          waited += 500;
-        }
-        if (!back) {
-          return { ok: false, reason: 'The board did not come back after the loader was sent.',
-            detail: 'Unplug the USB cable, put the board in Maskrom mode again and retry.' };
-        }
-      }
-    }
-
-    hooks.stage('storage', plan.storageLabel);
-    const cs = await r.run(['cs', String(plan.storageCode)]);
-    if (cs.code !== 0) {
-      return { ok: false, reason: `The board did not switch to ${plan.storageLabel}. Nothing was written.`,
-        detail: cs.lines.join('\n') };
-    }
-    const rfi = await r.run(['rfi']);
-    const capacity = rfi.code === 0 ? parseFlashSize(rfi.lines) : null;
+    await bringUp(r, plan, hooks);
+    const capacity = await selectStorage(r, plan.storageCode, plan.storageLabel, hooks);
     if (capacity !== null && plan.source.size > capacity) {
       return { ok: false, reason: `The image (${plan.source.size} bytes) does not fit in ${plan.storageLabel} (${capacity} bytes). Nothing was written.` };
     }
@@ -255,15 +290,185 @@ export async function flash(r: Runner, plan: FlashPlan, hooks: Hooks): Promise<F
       result = { ok: true, verified: 'skipped', sha256: expected ?? '', capacity };
     }
 
+    if (plan.clearBackupGpt) {
+      const lba = backupGptLba(capacity, plan.source.size);
+      if (lba === null) {
+        hooks.log(capacity === null ? 'The storage size is unknown, so the old backup partition table was left as it is.'
+          : 'The image reaches the last sectors of the storage; there is no old backup partition table to clear.');
+      } else {
+        // Not read back: on RK3576 this loader's reads past 32 MiB are not trustworthy.
+        const zeros: ByteSource = { size: BACKUP_GPT_SECTORS * SECTOR, read: (_p, n) => new Uint8Array(n) };
+        await step('write', ['wl', String(lba), r.mountSource(zeros)], 'Clearing the old backup partition table');
+        result = { ...result, clearedBackupGpt: true };
+      }
+    }
+
     if (plan.resetAfter) {
       hooks.stage('reset');
       await r.run(['rd']);
     }
     return result;
   } catch (e) {
+    if (e instanceof Stopped) return e.result;
     if (e instanceof FlashError) return { ok: false, reason: e.message };
     return { ok: false, reason: 'rkdeveloptool stopped with an error.', detail: String((e as Error)?.message ?? e) };
   }
 }
 
 export { progressOf };
+
+// ---- Several regions: a Rockchip update.img (rkfw.ts) ----
+
+/** Reads this far from the start of the storage come back as written on RK3576; past it, maybe not. */
+export const TRUSTED_READ_BYTES = 32 * 1024 * 1024;
+const SAMPLE = 64 * 1024;
+
+export interface RegionSpec { lba: number; source: ByteSource; label: string }
+
+/** A command run after the storage is chosen and before the first wl, with the files it needs. */
+export interface BeforeStep { what: string; files: Array<{ name: string; data: Uint8Array }>; args: (paths: string[]) => string[] }
+
+export interface RegionPlan {
+  loader: Uint8Array;
+  storageCode: number;
+  storageLabel: string;
+  /** What to write once the storage size is known, or why not. */
+  plan(capacity: number | null): { regions: RegionSpec[]; before?: BeforeStep[] } | { stop: string };
+  /**
+   * Read back everything written in the first this many bytes of the
+   * storage and compare it whole; past it (the loader's reads are trusted
+   * only so far), samples are compared and a mismatch is reported, not
+   * taken as a failed write.
+   */
+  checkHeadBytes: number;
+  resetAfter: boolean;
+  reconnectTimeout?: number;
+}
+
+export interface RegionChecks {
+  /** Bytes compared in full within checkHeadBytes, all equal. */
+  headBytes: number;
+  /** Samples past it that read back as written, as 0xCC filler, or as something else. */
+  matched: number;
+  filler: number;
+  unsure: number;
+}
+
+export type RegionResult =
+  | { ok: true; capacity: number | null; written: number; checks: RegionChecks }
+  | { ok: false; reason: string; detail?: string; written?: number };
+
+class Collect implements ByteSink {
+  chunks: Uint8Array[] = [];
+  write(c: Uint8Array) { this.chunks.push(c.slice()); }
+  bytes(): Uint8Array {
+    const out = new Uint8Array(this.chunks.reduce((n, c) => n + c.length, 0));
+    let o = 0;
+    for (const c of this.chunks) { out.set(c, o); o += c.length; }
+    return out;
+  }
+}
+
+const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((x, i) => x === b[i]);
+
+async function readSectors(r: Runner, lba: number, sectors: number): Promise<Uint8Array | null> {
+  const sink = new Collect();
+  const res = await r.run(['rl', String(lba), String(sectors), r.mountSink(sink)]);
+  return res.code === 0 ? sink.bytes().subarray(0, sectors * SECTOR) : null;
+}
+
+/**
+ * Write regions at their own sectors, after the `before` commands (an
+ * update.img's gpt parameter.txt and ul loader), then compare what was
+ * written: in full within checkHeadBytes, by samples past it.
+ */
+export async function flashRegions(r: Runner, plan: RegionPlan, hooks: Hooks): Promise<RegionResult> {
+  let written = 0;
+  const step = async (args: string[], what: string) => {
+    if (hooks.cancelled()) throw new FlashError('Cancelled.');
+    hooks.log(`$ rkdeveloptool ${args.join(' ')}`);
+    const res = await r.run(args);
+    if (res.code !== 0) throw new FlashError(`${what} failed (rkdeveloptool exit ${res.code}).`);
+  };
+  try {
+    await bringUp(r, plan, hooks);
+    const capacity = await selectStorage(r, plan.storageCode, plan.storageLabel, hooks);
+    const planned = plan.plan(capacity);
+    if ('stop' in planned) return { ok: false, reason: `${planned.stop} Nothing was written.` };
+    for (const g of planned.regions) {
+      if (capacity !== null && g.lba * SECTOR + g.source.size > capacity) {
+        return { ok: false, reason: `${g.label} does not fit ${plan.storageLabel} (${capacity} bytes). Nothing was written.` };
+      }
+    }
+
+    hooks.stage('write');
+    for (const b of planned.before ?? []) {
+      const paths = b.files.map((f) => r.writeFile(f.name, f.data));
+      await step(b.args(paths), b.what);
+    }
+    const total = planned.regions.reduce((n, g) => n + g.source.size, 0);
+    hooks.progress('write', 0);
+    for (const g of planned.regions) {
+      const base = written;
+      const counted: ByteSource = {
+        size: g.source.size,
+        read(position, length) {
+          hooks.progress('write', Math.floor(Math.min(base + position + length, total) * 100 / total));
+          return g.source.read(position, length);
+        },
+      };
+      await step(['wl', String(g.lba), r.mountSource(counted)], `Writing ${g.label}`);
+      written += g.source.size;
+    }
+
+    hooks.stage('verify');
+    hooks.progress('verify', 0);
+    const checks: RegionChecks = { headBytes: 0, matched: 0, filler: 0, unsure: 0 };
+    const limit = Math.min(plan.checkHeadBytes, TRUSTED_READ_BYTES);
+    const CHUNK = 1 << 20;
+    const headTotal = planned.regions.reduce((n, g) => n + Math.max(0, Math.min(g.lba * SECTOR + g.source.size, limit) - g.lba * SECTOR), 0);
+    for (const g of planned.regions) {
+      const start = g.lba * SECTOR;
+      const end = Math.min(start + g.source.size, limit);
+      for (let at = start; at < end; at += CHUNK) {
+        const len = Math.min(CHUNK, end - at);
+        const got = await readSectors(r, at / SECTOR, Math.ceil(len / SECTOR));
+        if (!got || !sameBytes(got.subarray(0, len), g.source.read(at - start, len))) {
+          return { ok: false, written, reason: `${g.label} does not read back as written (sector ${at / SECTOR}). Write it again.` };
+        }
+        checks.headBytes += len;
+        if (headTotal) hooks.progress('verify', Math.floor(checks.headBytes * 100 / headTotal));
+      }
+      // Past the trusted part: the start, middle and end of the region.
+      if (start + g.source.size > limit) {
+        const from = Math.max(0, limit - start);
+        const len = Math.min(SAMPLE, g.source.size - from);
+        const offs = new Set([from, Math.max(from, g.source.size - len), from + Math.floor((g.source.size - from) / 2 / SECTOR) * SECTOR]);
+        for (const off of offs) {
+          const n = Math.min(len, g.source.size - off);
+          if (n <= 0) continue;
+          const got = await readSectors(r, (start + off) / SECTOR, Math.ceil(n / SECTOR));
+          if (got && sameBytes(got.subarray(0, n), g.source.read(off, n))) checks.matched++;
+          else if (got && got.subarray(0, n).every((x) => x === FILLER)) checks.filler++;
+          else {
+            checks.unsure++;
+            hooks.log(`Sample at sector ${(start + off) / SECTOR} (${g.label}) read back ${got ? 'differently' : 'with an error'}; past 32 MiB the loader's reads are not trusted.`);
+          }
+        }
+      }
+    }
+    hooks.progress('verify', 100);
+    hooks.log(`Read back and compared ${checks.headBytes} bytes within the first ${limit / (1 << 20)} MiB: all equal.`);
+
+    if (plan.resetAfter) {
+      hooks.stage('reset');
+      await r.run(['rd']);
+    }
+    return { ok: true, capacity, written, checks };
+  } catch (e) {
+    if (e instanceof Stopped) return e.result;
+    const partly = written > 0 ? ` The ${plan.storageLabel} is only partly written: run the same write again.` : '';
+    if (e instanceof FlashError) return { ok: false, reason: `${e.message}${partly}`, written };
+    return { ok: false, reason: 'rkdeveloptool stopped with an error.', detail: String((e as Error)?.message ?? e), written };
+  }
+}

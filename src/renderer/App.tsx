@@ -4,7 +4,7 @@ import {
   ActionList, ActionListGroup, ActionListItem, Alert, AlertActionCloseButton, AlertActionLink, Button, CodeBlock, CodeBlockAction, CodeBlockCode, Content, DescriptionList,
   DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, EmptyState, EmptyStateActions, EmptyStateBody,
   EmptyStateFooter, ExpandableSection, Flex, FlexItem, Form, FormGroup, FormHelperText, FormSection, FormSelect, FormSelectOption,
-  HelperText, HelperTextItem, List, ListItem, Masthead,
+  Checkbox, HelperText, HelperTextItem, List, ListItem, Masthead,
   MastheadBrand, MastheadContent, MastheadLogo, MastheadMain, Modal, ModalBody, ModalFooter, ModalHeader, Page,
   PageSection, Progress, ProgressMeasureLocation, Radio, SearchInput, Sidebar, SidebarContent, SidebarPanel, SimpleList,
   SimpleListItem,
@@ -20,7 +20,7 @@ import {
 } from '../shared/catalog';
 import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../shared/boardsearch';
 import { formatBytes, uncompressedName } from '../shared/format';
-import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
+import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile, SaveSubject, SaveTarget, UpdateImageFile } from '../shared/ipc';
 import type { CacheInfo } from '../main/cache';
 import { INTERNAL_WORDS, type HiddenDrive, type Target } from '../shared/targets';
 import { APT_COMMAND, brewCommand, type UpdateCheck, type UpdateOffer, type UpdateResult } from '../shared/update';
@@ -52,7 +52,7 @@ const RPI_IMAGER_URL = 'https://www.raspberrypi.com/software/';
 const LOADER_NOTE = `The first Maskrom write downloads Rockchip's loader from ${RKBIN_HOST} (rockchip-linux/rkbin) and checks it.`;
 
 type Method = 'sd' | 'maskrom' | 'file';
-type MaskromSource = 'release' | 'spi' | 'file';
+type MaskromSource = 'release' | 'spi' | 'file' | 'update';
 /** A release file being downloaded or checked: what, and how far. */
 interface Checking { label: string; done: number; total: number }
 
@@ -79,6 +79,14 @@ function isUefiImage(img: CatalogImage | undefined): boolean {
  * one, and with Ventoy an arm64 UEFI computer. Never an x86 PC.
  */
 const UEFI_VM = 'an arm64 (aarch64) UEFI machine, such as QEMU virt with edk2 (AAVMF) or UTM on Apple silicon';
+/** One line on what an update.img holds. */
+function updateWords(f: UpdateImageFile): string {
+  const u = f.update;
+  const who = [u.manufacturer, u.model].filter(Boolean).join(' ');
+  return `${u.chip}${who ? `, ${who}` : ''}, version ${u.version} of ${u.released}: ${u.partitions.map((x) => x.name).join(', ')}`
+    + `${u.skipped.length ? ` (not written: ${u.skipped.join(', ')})` : ''}. ${f.md5Checked ? 'Its MD5 matches.' : 'It carries no MD5 to check.'}`;
+}
+
 function bootNote(img: CatalogImage | undefined, custom: boolean): string {
   if (custom) {
     return `Where it boots depends on the image: a Roxora board image only on its board, the generic RK3576 UEFI image in ${UEFI_VM}. Not on an x86 PC.`;
@@ -497,6 +505,10 @@ function DestinationStep(p: {
   storage: StorageId | null; setStorage: (s: StorageId) => void;
   source: MaskromSource; setSource: (s: MaskromSource) => void;
   file: PreparedFile | null; pickFile: () => void; picking: boolean; fileError: string | null;
+  /** A Rockchip update.img for the eMMC (desktop only). */
+  updateFile: UpdateImageFile | null; pickUpdate: () => void;
+  /** After a whole image, also zero the old backup GPT at the end of the storage. */
+  clearGpt: boolean; setClearGpt: (v: boolean) => void;
   releaseFile: PreparedFile | null; pickRelease: () => void; checking: Checking | null;
   downloadRelease: () => void; proxyError: string | null;
   /** An image file from this computer that is no release image: SD card or USB drive only. */
@@ -687,6 +699,29 @@ function DestinationStep(p: {
                   <Button variant="secondary" onClick={p.pickFile} isLoading={p.picking} isDisabled={p.picking}>Choose file</Button>,
                   p.file ? `${p.file.name}, ${formatBytes(p.file.size)}` : 'No file chosen',
                 ) : undefined} />
+              {api.pickUpdateImage && mb.storages.includes('emmc') && (
+                <Radio id="src-update" name="source" isChecked={p.source === 'update'} onChange={() => p.setSource('update')}
+                  isDisabled={p.storage !== 'emmc'}
+                  label="A Rockchip update.img (a vendor's factory firmware package)"
+                  description={p.storage !== 'emmc' ? 'For the eMMC only.'
+                    : 'Written as RKDevTool\'s Upgrade Firmware does: the partition table from its parameter.txt, its loader, then each partition where parameter.txt puts it. Refused for another chip. Not yet tried on a board.'}
+                  body={p.source === 'update' ? (
+                    <Stack hasGutter>
+                      {fileRow(
+                        <Button variant="secondary" onClick={p.pickUpdate} isLoading={p.picking} isDisabled={p.picking}>Choose update.img</Button>,
+                        p.updateFile ? `${p.updateFile.name}, ${formatBytes(p.updateFile.size)}` : 'No file chosen',
+                      )}
+                      {p.updateFile && <Content component="p" className="detail">{updateWords(p.updateFile)}</Content>}
+                    </Stack>
+                  ) : undefined} />
+              )}
+              {(p.source === 'release' || p.source === 'file') && (p.storage === 'emmc' || p.storage === 'sd') && (
+                <Checkbox id="clear-gpt" isChecked={p.clearGpt} onChange={(_e, v) => p.setClearGpt(v)}
+                  label="Also clear the old backup partition table at the end of the storage"
+                  description={'A GPT keeps a copy of itself in the last 33 sectors. An image smaller than the storage leaves the old copy there, '
+                    + 'and some tools then report a damaged or stale partition table. With this ticked those sectors are zeroed after the image is written; '
+                    + 'they are not read back.'} />
+              )}
               {p.fileError && <Alert variant="danger" isInline isPlain title={p.fileError} />}
               {p.spiProblem && <Alert variant="danger" isInline isPlain title={p.spiProblem} />}
             </FormGroup>
@@ -1171,6 +1206,8 @@ export function App() {
   const [file, setFile] = useState<PreparedFile | null>(null);
   const [picking, setPicking] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [updateFile, setUpdateFile] = useState<UpdateImageFile | null>(null);
+  const [clearGpt, setClearGpt] = useState(false);
   const [releaseFile, setReleaseFile] = useState<PreparedFile | null>(null);
   const [checking, setChecking] = useState<Checking | null>(null);
   const [proxyError, setProxyError] = useState<string | null>(null);
@@ -1317,6 +1354,19 @@ export function App() {
     setFile(r);
   };
 
+  const pickUpdate = async () => {
+    if (!api.pickUpdateImage) return;
+    setPicking(true);
+    setFileError(null);
+    if (updateFile) api.releaseMaskrom(updateFile.token);
+    setUpdateFile(null);
+    const r = await api.pickUpdateImage();
+    setPicking(false);
+    if (!r) return;
+    if ('error' in r) { setFileError(r.error); return; }
+    setUpdateFile(r);
+  };
+
   const pickRelease = async () => {
     if (!image || !api.pickReleaseFile) return;
     setFileError(null);
@@ -1370,7 +1420,8 @@ export function App() {
     }) : null;
   const destReady = method === 'sd' ? !!target
     : method === 'file' ? !!saveTarget && !saveShort
-    : !!storage && (source === 'file' ? !!file && !spiProblem
+    : !!storage && (source === 'update' ? !!updateFile && storage === 'emmc'
+      : source === 'file' ? !!file && !spiProblem
       : source === 'spi' ? !!image?.spi && storage === 'spinor' && (!WEB || !!releaseFile)
         : !!image && !!mb?.wholeImage.includes(storage) && (!WEB || !!releaseFile));
 
@@ -1476,9 +1527,9 @@ export function App() {
     const r: Run = {
       kind: 'maskrom', log: [], result: null,
       stages: [
-        { id: 'prepare', label: source === 'release' ? 'Download, check and decompress' : source === 'spi' ? 'Download and check' : 'Prepare the file', percent: 0 },
+        { id: 'prepare', label: source === 'release' ? 'Download, check and decompress' : source === 'spi' ? 'Download and check' : source === 'update' ? 'Read the update.img' : 'Prepare the file', percent: 0 },
         { id: 'loader', label: 'Send the loader and wait for the board', percent: null },
-        { id: 'write', label: `Write ${st.label}`, percent: 0 },
+        { id: 'write', label: source === 'update' ? `Write the partition table, the loader and the partitions to the ${st.label}` : `Write ${st.label}`, percent: 0 },
         { id: 'verify', label: 'Read back and compare', percent: 0 },
       ],
     };
@@ -1487,7 +1538,7 @@ export function App() {
       setRun((cur) => cur && { ...cur, stages: cur.stages.map((s) => (s.id === id ? { ...s, ...patch } : s)) });
     const finish = (result: Run['result']) => setRun((cur) => cur && { ...cur, result });
 
-    let prepared = source === 'file' ? file : WEB ? releaseFile : null;
+    let prepared: PreparedFile | null = source === 'file' ? file : source === 'update' ? updateFile : WEB ? releaseFile : null;
     if (!WEB && (source === 'release' || source === 'spi') && image) {
       const off = api.onProgress((p) => setStage('prepare', { percent: p.total ? Math.min(100, Math.floor(p.bytes * 100 / p.total)) : null, detail: p.stage }));
       const res = await api.prepareMaskrom(image.id, source === 'spi' ? 'spi' : 'image');
@@ -1501,7 +1552,7 @@ export function App() {
     setStage('loader', { percent: null, detail: "getting Rockchip's loader" });
     const loader = await api.getLoader(mb.loader);
     if ('error' in loader) {
-      if (source !== 'file') api.releaseMaskrom(prepared.token);
+      if (source !== 'file' && source !== 'update') api.releaseMaskrom(prepared.token);
       finish({ ok: false, title: loader.error, text: 'Nothing was written.' });
       return;
     }
@@ -1511,6 +1562,8 @@ export function App() {
       loaderUrl: loader.url, size: prepared.size, sha256: prepared.sha256,
       ...(prepared.file ? { file: prepared.file, reconnectTimeout: 180000 } : { fileUrl: prepared.url }),
       storageCode: st.code, storageLabel: st.label, verify: true, resetAfter: settingsNow.resetAfterMaskrom,
+      ...(source === 'update' ? { updateImage: true } : {}),
+      ...(clearGpt && (source === 'release' || source === 'file') && (storage === 'emmc' || storage === 'sd') ? { clearBackupGpt: true } : {}),
     }, {
       log: (line) => setRun((cur) => cur && { ...cur, log: [...cur.log, line] }),
       stage: (s: Stage) => {
@@ -1532,13 +1585,24 @@ export function App() {
     }
     maskromJob.current = null;
     setReconnect(false);
-    if (source !== 'file') api.releaseMaskrom(prepared.token);
+    if (source !== 'file' && source !== 'update') api.releaseMaskrom(prepared.token);
     const restarting = settingsNow.resetAfterMaskrom ? ' The board is restarting.' : '';
     const mib = (n: number) => `${Math.floor(n / 1048576)} MiB`;
+    if ('checks' in res) {
+      const c = res.checks;
+      const past = c.matched + c.filler + c.unsure;
+      finish({ ok: true, warning: c.unsure > 0, title: 'Written',
+        text: `${prepared.name} is on the ${st.label}: the partition table, the loader and ${res.written ? formatBytes(res.written) : 'nothing'} of partitions. `
+          + `Everything written in the first 32 MiB read back as written (${formatBytes(c.headBytes)}).`
+          + (past ? ` Of ${past} samples further on, ${c.matched} matched, ${c.filler} came back as the loader's filler and ${c.unsure} differently; past 32 MiB this loader's reads are not trustworthy, so those say nothing about the write.` : '')
+          + restarting });
+      return;
+    }
+    const gpt = 'clearedBackupGpt' in res && res.clearedBackupGpt ? ' The old backup partition table at the end was cleared.' : '';
     finish(!res.ok
       ? { ok: false, title: res.reason, text: 'Check the connection and the output below.', ...(res.detail ? { detail: res.detail } : {}) }
       : res.verified === 'match'
-        ? { ok: true, title: 'Written and verified', text: `${prepared.name} is on the ${st.label}. The read-back matches (SHA-256 ${res.sha256}).${restarting}` }
+        ? { ok: true, title: 'Written and verified', text: `${prepared.name} is on the ${st.label}. The read-back matches (SHA-256 ${res.sha256}).${gpt}${restarting}` }
         : res.verified === 'partial'
           ? { ok: true, warning: true, title: `Written; the first ${mib(res.verifiedBytes)} verified`,
             text: `${prepared.name} is on the ${st.label}. The first ${mib(res.verifiedBytes)} read back as written. Past that, this board's loader returns filler when the ${st.label} is read over USB, so the rest could not be checked; the write itself went through. Booting the board from it shows it works.${restarting}` }
@@ -1624,6 +1688,7 @@ export function App() {
                 showInternal={internalSwitch ? showInternal : null} setShowInternal={toggleInternal}
                 storage={storage} setStorage={(s) => { setStorage(s); setSource(mb?.wholeImage.includes(s) ? 'release' : s === 'spinor' && image?.spi ? 'spi' : 'file'); }}
                 source={source} setSource={setSource} file={file} pickFile={pickFile} picking={picking} fileError={fileError}
+                updateFile={updateFile} pickUpdate={pickUpdate} clearGpt={clearGpt} setClearGpt={setClearGpt}
                 releaseFile={releaseFile} pickRelease={pickRelease} checking={checking}
                 downloadRelease={downloadRelease} proxyError={proxyError} custom={custom} spiProblem={spiProblem}
                 saveTarget={saveTarget} pickSave={pickSave} savePicking={savePicking} saveError={saveError ?? saveShort} />
@@ -1656,6 +1721,12 @@ export function App() {
                 {WEB && source !== 'file' && releaseFile && (
                   <DescriptionListGroup><DescriptionListTerm>Release file</DescriptionListTerm><DescriptionListDescription>{releaseFile.name}, matches the release SHA-256</DescriptionListDescription></DescriptionListGroup>
                 )}
+                {method === 'maskrom' && source === 'update' && updateFile && (
+                  <DescriptionListGroup><DescriptionListTerm>update.img</DescriptionListTerm><DescriptionListDescription>{updateFile.name}, {formatBytes(updateFile.size)}: {updateWords(updateFile)}</DescriptionListDescription></DescriptionListGroup>
+                )}
+                {method === 'maskrom' && clearGpt && (source === 'release' || source === 'file') && (storage === 'emmc' || storage === 'sd') && (
+                  <DescriptionListGroup><DescriptionListTerm>Also</DescriptionListTerm><DescriptionListDescription>The old backup partition table at the end of the storage is cleared after the image.</DescriptionListDescription></DescriptionListGroup>
+                )}
                 {method === 'maskrom' && source === 'file' && file && (
                   <DescriptionListGroup><DescriptionListTerm>File</DescriptionListTerm><DescriptionListDescription>{file.name}, {formatBytes(file.size)}</DescriptionListDescription></DescriptionListGroup>
                 )}
@@ -1671,6 +1742,7 @@ export function App() {
                   {method === 'file' ? saveChecks
                     : custom ? 'The image is read once to take its SHA-256. After writing, the drive is read back and compared with it. Nothing is compared with a Roxora release.'
                     : method === 'sd' && local ? 'The file is checked against the release SHA-256 again. After writing, the drive is read back and compared with the release SHA-256.'
+                    : method === 'maskrom' && source === 'update' ? 'The MD5 inside the update.img was checked when it was chosen. After writing, everything written in the first 32 MiB of the eMMC is read back and compared; past that, samples of each partition are compared, and one that differs is reported, not taken as a failed write (this loader\'s reads past 32 MiB are not trustworthy).'
                     : method === 'sd' || source === 'release' || source === 'spi'
                     ? 'The download is checked against the release SHA-256. After writing, the destination is read back and compared with the release SHA-256.'
                     : 'After writing, the storage is read back and compared with the file.'}

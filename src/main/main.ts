@@ -9,13 +9,15 @@ import * as drivelist from 'drivelist';
 import { formatBytes } from '../shared/format';
 import { classifyDrives, isOfferedTarget, type DriveInfo } from '../shared/targets';
 import { withDiskFacts } from './linux-disks';
-import type { JobProgress, JobResult, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
+import type { UpdateImageFile, JobProgress, JobResult, LocalImage, PreparedFile, SaveSubject, SaveTarget } from '../shared/ipc';
 import type { CatalogImage } from '../shared/catalog';
 import { partitionedSize } from '../maskrom/spi-check';
 import { loadReleases, loadSample, writableImage, writableImages, type CatalogState } from './catalog-source';
 import { helperLaunch, runHelper, sudoPromptElevate } from './elevate';
 import { decompress, detectCompression, fetchImage, forgetFile, serveFile, serveFileAs, servedPaths } from './images';
 import { cacheInfo, clearCache, inCache } from './cache';
+import { checkUpdateMd5, inspectUpdateImage } from './update-image';
+import { planFactory, summarize } from '../maskrom/rkfw';
 import { isChannel } from '../shared/channel';
 import { ensureLoader } from './loader-cache';
 import { describeLocal, measureFile, sha256OfFile } from './local-image';
@@ -406,6 +408,32 @@ ipcMain.handle('maskrom:pick', async (e) => {
   try {
     const path = r.filePaths[0];
     return await prepare(e.sender, path, path.split(/[\\/]/).pop() ?? path, null, job.signal);
+  } catch (err) {
+    return { error: String((err as Error).message ?? err) };
+  } finally {
+    job = null;
+  }
+});
+
+ipcMain.handle('maskrom:pick-update', async (e): Promise<UpdateImageFile | { error: string } | null> => {
+  if (job) return { error: 'Another job is running.' };
+  const r = await dialog.showOpenDialog(win!, {
+    title: 'Choose the Rockchip update.img',
+    properties: ['openFile'],
+    filters: [{ name: 'Rockchip firmware package', extensions: ['img'] }, { name: 'All files', extensions: ['*'] }],
+  });
+  if (r.canceled || r.filePaths.length === 0) return null;
+  const path = r.filePaths[0];
+  job = new AbortController();
+  try {
+    const info = inspectUpdateImage(path);
+    const plan = planFactory(info, null);
+    if ('stop' in plan) return { error: plan.stop };
+    const bad = await checkUpdateMd5(path, info, (bytes, total) => sendProgress(e.sender, { stage: 'check', bytes, total }), job.signal);
+    if (bad) return { error: bad };
+    const s = serveFile(path);
+    return { token: s.token, url: `${ORIGIN}/file/${s.token}`, size: s.size, sha256: null, name: basename(path),
+      update: summarize(info, plan), md5Checked: info.md5 !== null };
   } catch (err) {
     return { error: String((err as Error).message ?? err) };
   } finally {
