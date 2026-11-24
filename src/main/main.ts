@@ -1,7 +1,7 @@
 // The Electron main process: the window, the app:// protocol, WebUSB access
 // for the Maskrom worker, and everything that touches disks or the network.
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, session, shell, type WebContents } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, screen, session, shell, type WebContents } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { open } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
@@ -63,8 +63,14 @@ function askUsb(wc: WebContents, choices: UsbChoice[]): Promise<string> {
 }
 
 function createWindow() {
+  // Never larger than the screen's work area (a 1366x768 laptop at 125%
+  // has 1093x614 to give): a window taller than the screen hides its
+  // bottom, the wizard's buttons with it, and no scrolling inside it can
+  // reach that.
+  const area = screen.getPrimaryDisplay().workAreaSize;
   win = new BrowserWindow({
-    width: 1100, height: 760, minWidth: 720, minHeight: 560,
+    width: Math.min(1100, area.width), height: Math.min(760, area.height),
+    minWidth: Math.min(720, area.width), minHeight: Math.min(480, area.height),
     show: false,
     title: 'Roxora Imager',
     // The design icon (resources/icons/, from roxora-os/design) for the title

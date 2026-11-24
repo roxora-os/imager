@@ -2,6 +2,29 @@
    Stack, Flex and Form; what is here is only what PatternFly has no option for. */
 html, body, #root { height: 100%; }
 
+/* The desktop app (main.tsx sets .desktop; the web build is a web page and
+   keeps a browser's behaviour). One scroll container per view: the
+   wizard's main column in the wizard, PatternFly's page main elsewhere (the
+   run view), the modal body in a dialog. The document itself never
+   scrolls, so a wheel anywhere over the content reaches the element that
+   can move. */
+:root.desktop, :root.desktop body, :root.desktop #root { overflow: hidden; }
+:root.desktop .pf-v6-c-page { height: 100%; }
+
+/* Not a web page either: the chrome and static text are not selectable by a
+   stray drag or a double click, and Ctrl+A in it selects nothing
+   (main.tsx). What people copy stays selectable: fields, code and logs,
+   file paths and details, alert texts (the results, with their SHA-256),
+   error messages, description values (the review, Settings). */
+:root.desktop body { user-select: none; -webkit-user-select: none; }
+:root.desktop :is(input, textarea, [contenteditable="true"],
+  .pf-v6-c-code-block, .pf-v6-c-code-block *, .detail, .selectable,
+  .pf-v6-c-alert__title, .pf-v6-c-alert__description,
+  .pf-v6-c-helper-text__item.pf-m-error,
+  .pf-v6-c-description-list__description) {
+  user-select: text; -webkit-user-select: text;
+}
+
 /* Roxora's colours in place of PatternFly's blue and grey, the same as the
    website's (roxora-os.github.io, assets/site.css). Only palette
    steps that PatternFly's semantic tokens point at are replaced, so every

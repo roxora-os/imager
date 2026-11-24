@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- The window is never taller or wider than the screen's work area (on a
+  1366x768 laptop at 125% it ran past the bottom of the screen), and can
+  be made as small as 720x480. Static text and the page chrome no longer
+  take a selection from a stray drag, and Ctrl+A outside a text field
+  selects nothing; fields, logs, details, results and error messages can
+  still be selected and copied.
 - Windows on Arm: a native arm64 installer and zip next to the x64 ones.
   The in-app update installs the arm64 build on an arm64 computer.
 - Destination: a third choice, Save as an image file, saves the
