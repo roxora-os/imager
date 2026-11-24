@@ -98,7 +98,7 @@ The app looks for a newer version once a day and offers to install it
 (Settings has "Check now" and the switch to turn the check off). Normal
 releases are offered to everyone. Beta versions are the pre-releases on
 GitHub, with a version such as 0.1.5-beta.1; they are offered only when
-"Also offer beta versions (pre-releases)" is turned on in Settings, and
+"Also offer beta versions" is turned on in Settings, and
 `install.sh` installs one only with `BETA=1`. Updates are installed inside
 the app after you confirm; how depends on how the app was installed (on
 macOS through Homebrew or by replacing the app from the new DMG):

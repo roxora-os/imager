@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActionList, ActionListGroup, ActionListItem, Alert, AlertActionCloseButton, AlertActionLink, Button, CodeBlock, CodeBlockAction, CodeBlockCode, Content, DescriptionList,
   DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, EmptyState, EmptyStateActions, EmptyStateBody,
-  EmptyStateFooter, ExpandableSection, Flex, FlexItem, Form, FormGroup, FormSelect, FormSelectOption, Masthead,
+  EmptyStateFooter, ExpandableSection, Flex, FlexItem, Form, FormGroup, FormHelperText, FormSection, FormSelect, FormSelectOption,
+  HelperText, HelperTextItem, Masthead,
   MastheadBrand, MastheadContent, MastheadLogo, MastheadMain, Modal, ModalBody, ModalFooter, ModalHeader, Page,
   PageSection, Progress, ProgressMeasureLocation, Radio, SearchInput, Sidebar, SidebarContent, SidebarPanel, SimpleList,
   SimpleListItem,
@@ -959,40 +960,53 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
         {s && (
           <Form onSubmit={(e) => e.preventDefault()}>
             {!WEB && (
-              <FormGroup label="Updates" fieldId="updates" role="group">
-                <Stack hasGutter id="updates">
+              <FormSection title="Updates" titleElement="h3">
+                <FormGroup fieldId="set-update" label="Automatic check" hasNoPaddingTop>
                   <Switch id="set-update" label="Check for a new version once a day" isChecked={s.updateCheck}
                     onChange={(_e, v) => { set({ updateCheck: v }); }} />
-                  <Switch id="set-beta" label="Also offer beta versions (pre-releases)" isChecked={s.betaUpdates === true}
+                </FormGroup>
+                <FormGroup fieldId="set-beta" label="Beta versions" hasNoPaddingTop>
+                  <Switch id="set-beta" label="Also offer beta versions" isChecked={s.betaUpdates === true}
                     onChange={(_e, v) => { set({ betaUpdates: v }).then(checkNow); }} />
+                  <FormHelperText><HelperText><HelperTextItem>Pre-releases on GitHub, before they become a normal release.</HelperTextItem></HelperText></FormHelperText>
+                </FormGroup>
+                <FormGroup fieldId="check-now">
                   <Flex spaceItems={{ default: 'spaceItemsMd' }} alignItems={{ default: 'alignItemsCenter' }}>
                     <FlexItem flex={{ default: 'flexNone' }}>
-                      <Button variant="secondary" onClick={checkNow} isLoading={checking} isDisabled={checking}>Check now</Button>
+                      <Button id="check-now" variant="secondary" onClick={checkNow} isLoading={checking} isDisabled={checking}>Check now</Button>
                     </FlexItem>
                     {check && <FlexItem className="update-result" aria-live="polite">{checkWords(check)}</FlexItem>}
                     {check?.state === 'newer' && (
                       <FlexItem><Button variant="link" isInline isDisabled={writing} onClick={onUpdate}>Update</Button></FlexItem>
                     )}
                   </Flex>
-                </Stack>
-              </FormGroup>
+                </FormGroup>
+              </FormSection>
             )}
-            <Switch id="set-reset" label="Restart the board after a Maskrom write" isChecked={s.resetAfterMaskrom}
-              onChange={(_e, v) => { set({ resetAfterMaskrom: v }); }} />
-            <FormGroup label="Appearance" fieldId="appearance" role="group">
-              <ToggleGroup aria-label="Appearance" id="appearance">
-                {(['system', 'light', 'dark'] as Theme[]).map((t) => (
-                  <ToggleGroupItem key={t} text={t[0].toUpperCase() + t.slice(1)} isSelected={theme === t} onChange={() => setTheme(t)} />
-                ))}
-              </ToggleGroup>
-            </FormGroup>
-            <DescriptionList isCompact isHorizontal>
-              <DescriptionListGroup><DescriptionListTerm>Version</DescriptionListTerm><DescriptionListDescription>{api.version}</DescriptionListDescription></DescriptionListGroup>
-              <DescriptionListGroup><DescriptionListTerm>License</DescriptionListTerm><DescriptionListDescription>GPL-2.0</DescriptionListDescription></DescriptionListGroup>
-              <DescriptionListGroup><DescriptionListTerm>Source</DescriptionListTerm><DescriptionListDescription>
-                <Button variant="link" isInline component="a" href="https://github.com/roxora-os/imager" target="_blank">github.com/roxora-os/imager</Button>
-              </DescriptionListDescription></DescriptionListGroup>
-            </DescriptionList>
+            <FormSection title="Maskrom" titleElement="h3">
+              <FormGroup fieldId="set-reset" label="After writing" hasNoPaddingTop>
+                <Switch id="set-reset" label="Restart the board after a Maskrom write" isChecked={s.resetAfterMaskrom}
+                  onChange={(_e, v) => { set({ resetAfterMaskrom: v }); }} />
+              </FormGroup>
+            </FormSection>
+            <FormSection title="Appearance" titleElement="h3">
+              <FormGroup fieldId="appearance" label="Theme" role="group">
+                <ToggleGroup aria-label="Theme" id="appearance">
+                  {(['system', 'light', 'dark'] as Theme[]).map((t) => (
+                    <ToggleGroupItem key={t} text={t[0].toUpperCase() + t.slice(1)} isSelected={theme === t} onChange={() => setTheme(t)} />
+                  ))}
+                </ToggleGroup>
+              </FormGroup>
+            </FormSection>
+            <FormSection title="About" titleElement="h3">
+              <DescriptionList isCompact isHorizontal>
+                <DescriptionListGroup><DescriptionListTerm>Version</DescriptionListTerm><DescriptionListDescription>{api.version}</DescriptionListDescription></DescriptionListGroup>
+                <DescriptionListGroup><DescriptionListTerm>License</DescriptionListTerm><DescriptionListDescription>GPL-2.0</DescriptionListDescription></DescriptionListGroup>
+                <DescriptionListGroup><DescriptionListTerm>Source</DescriptionListTerm><DescriptionListDescription>
+                  <Button variant="link" isInline component="a" href="https://github.com/roxora-os/imager" target="_blank">github.com/roxora-os/imager</Button>
+                </DescriptionListDescription></DescriptionListGroup>
+              </DescriptionList>
+            </FormSection>
           </Form>
         )}
       </ModalBody>

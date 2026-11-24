@@ -116,7 +116,7 @@ an **Update** button. Closing the notice hides that version; Settings still
 offers it. No notice appears while a write is running. In Settings:
 
 - **Check for a new version once a day** turns the check off or on.
-- **Also offer beta versions (pre-releases)** is off by default. Normal
+- **Also offer beta versions** (pre-releases on GitHub) is off by default. Normal
   releases are offered to everyone; betas only with this switch on. If the
   version you run is itself a beta and no newer normal release exists, the
   app says so and offers nothing.
