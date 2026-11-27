@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- Maskrom, SPI NOR flash: a safer write. Nothing is written unless the
+  storage the board reports after the switch to SPI NOR is SPI NOR sized
+  (the board must report its size, at most 64 MiB), so an eMMC or a UFS
+  module is never taken for it. The desktop app then copies the whole
+  flash (16 MiB on the ROCK 4D) to
+  `spi-backups/<board>-<time>/spi-nor-before.bin` in its data folder, with
+  a note giving its SHA-256 and how to put it back, before writing; if the
+  copy cannot be read or saved, nothing is written. The Review step says a
+  copy is taken and the run page shows the folder. Not yet tried on a
+  board.
 - A failed write, save or Maskrom write ends with Try again (the same
   write, every choice kept, the board looked for and the loader sent again,
   downloads taken from the cache) and Back to the steps (the Review step,

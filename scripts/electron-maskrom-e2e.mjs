@@ -7,7 +7,7 @@
 import { _electron as electron } from 'playwright-core';
 import { build } from 'esbuild';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -68,11 +68,49 @@ try {
   console.log(JSON.stringify(a, null, 2));
   const b = await runOne(true);
   console.log(JSON.stringify(b, null, 2));
-  ok = check(a) && check(b);
+  // The SPI NOR flash: a small bootloader picked in the page, with the copy
+  // of the whole flash (16 MiB) kept first through the main process
+  // (main/spi-backup.ts), as the app's page does.
+  const c = await page.evaluate(async () => {
+    const loader = await window.imager.getLoader('rk3576_spl_loader.bin');
+    if ('error' in loader) return { loaderError: loader.error };
+    const data = crypto.getRandomValues(new Uint8Array(1 << 20));
+    const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
+    const sha256 = hex(await crypto.subtle.digest('SHA-256', data));
+    const w = new Worker('fake-flash-worker.js', { type: 'module' });
+    const stages = [];
+    let kept = null;
+    const result = await new Promise((resolve) => {
+      w.onerror = (e) => resolve({ workerError: String(e.message ?? e.type) });
+      w.onmessage = (e) => {
+        const m = e.data;
+        if (m.type === 'stage') stages.push(m.stage);
+        if (m.type === 'backup') {
+          window.imager.keepSpiBackup('radxa-rock-4d', m.data).then((r) => { kept = r; w.postMessage({ type: 'backup-saved', result: r }); });
+        }
+        if (m.type === 'result') resolve(m.result);
+      };
+      const o = location.origin;
+      w.postMessage({ type: 'start', moduleUrl: `${o}/wasm/rkdeveloptool.js`, wasmUrl: `${o}/wasm/rkdeveloptool.wasm`,
+        loaderUrl: loader.url, xzWasmUrl: `${o}/resources/xzwasm/xzwasm.wasm`, size: data.length, sha256,
+        storageCode: 9, storageLabel: 'SPI NOR flash', verify: true, resetAfter: true, spiNor: { keep: true },
+        file: new File([data], 'bootloader.img') });
+    });
+    return { result, stages, kept };
+  });
+  console.log(JSON.stringify(c, null, 2));
+  const keptDir = c.kept?.path;
+  const keptFile = keptDir ? join(keptDir, 'spi-nor-before.bin') : '';
+  const spiOk = c.result?.ok === true && c.result.verified === 'match' && c.stages.includes('backup')
+    && !!keptDir && existsSync(keptFile) && statSync(keptFile).size === 16 * 1024 * 1024
+    && readFileSync(join(keptDir, 'backup.txt'), 'utf8').includes('board: radxa-rock-4d');
+  console.log(spiOk ? `SPI NOR: written and verified; the flash as it was is kept in ${keptDir}` : 'SPI NOR: FAIL');
+  if (keptDir) rmSync(keptDir, { recursive: true, force: true });
+  ok = check(a) && check(b) && spiOk;
 } finally {
   await app.close();
   rmSync('build/renderer/fake-flash-worker.js', { force: true });
   rmSync(dir, { recursive: true, force: true });
 }
-console.log(ok ? 'PASS: image written to the pretend eMMC through the Electron worker and verified, from a served file and from a picked .img.xz' : 'FAIL');
+console.log(ok ? 'PASS: image written to the pretend eMMC through the Electron worker and verified, from a served file and from a picked .img.xz; a bootloader to the pretend SPI NOR, its copy kept first' : 'FAIL');
 process.exit(ok ? 0 : 1);

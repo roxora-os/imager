@@ -30,6 +30,7 @@ import { loadSettings, saveSettings } from './settings';
 import { afterUpdateCleanup, cancelUpdate, checkForUpdate, installUpdate, restartApp } from './updater';
 import { installUsbHandlers, ROCKCHIP_VID, type UsbChoice } from './usb';
 import { factsFrom, fullLog, issueUrl, type Who } from '../shared/report';
+import { keepSpiBackup } from './spi-backup';
 
 registerScheme();
 
@@ -452,6 +453,9 @@ ipcMain.handle('maskrom:loader', async (_e, name: string) => {
     return { error: String((err as Error).message ?? err) };
   }
 });
+
+// The SPI NOR flash as it was before a write over Maskrom (spi-backup.ts).
+ipcMain.handle('maskrom:keep-spi', (_e, board: unknown, data: unknown) => keepSpiBackup(app.getPath('userData'), board, data));
 
 ipcMain.handle('maskrom:release', (_e, token: string) => {
   forgetFile(token, temporary.delete(token));

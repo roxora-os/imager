@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { FakeBoard } from './fake-rockchip';
 import { syntheticLoader } from './synthetic-loader';
 import { createRunner } from '../src/maskrom/runner';
-import { BOARD_GONE, flash, parseFlashSize, parseList, type FlashPlan, type Hooks } from '../src/maskrom/sequence';
+import { BOARD_GONE, flash, parseFlashSize, parseList, spiStorageProblem, SPI_MAX_BYTES, type FlashPlan, type Hooks } from '../src/maskrom/sequence';
 
 const WASM_DIR = new URL('../vendor/rkdeveloptool-wasm/', import.meta.url);
 const haveWasm = existsSync(new URL('rkdeveloptool.wasm', WASM_DIR));
@@ -168,5 +168,53 @@ describe.skipIf(!haveWasm)('Maskrom flash through the WASM rkdeveloptool', () =>
     const { runner } = await setup(board);
     const res = await flash(runner, plan(image), hooks([]));
     expect((res as { reason: string }).reason).toBe('No board in Maskrom mode was found.');
+  });
+
+  // The SPI NOR flash (from Maskrom Studio's safer SPI write): a copy of it is kept before anything is written.
+  const bootloader = new Uint8Array(randomBytes(3 * MiB + 512));
+  const spiPlan = (keep: (c: Uint8Array) => Promise<{ path: string } | { error: string }>) =>
+    plan(bootloader, { storageCode: 9, storageLabel: 'SPI NOR flash', spiNor: { keep } });
+
+  it('keeps the whole SPI NOR flash before writing it, then writes and verifies', async () => {
+    const board = new FakeBoard({ storages: { 1: 64 * MiB, 9: 16 * MiB }, defaultStorage: 1 });
+    const before = new Uint8Array(randomBytes(16 * MiB));
+    board.storages.get(9)!.write(0, before);
+    const { runner } = await setup(board);
+    const stages: string[] = [];
+    let kept: Uint8Array | null = null;
+    const res = await flash(runner, spiPlan(async (c) => { kept = c.slice(); return { path: '/kept' }; }), hooks(stages));
+    expect(res).toMatchObject({ ok: true, verified: 'match', capacity: 16 * MiB });
+    expect(stages).toEqual(['detect', 'loader', 'reconnect', 'storage', 'backup', 'write', 'verify', 'reset']);
+    expect(kept).not.toBeNull();
+    expect(Buffer.from(kept!).equals(Buffer.from(before))).toBe(true);
+    expect(Buffer.from(board.contents(9, bootloader.length)).equals(Buffer.from(bootloader))).toBe(true);
+  });
+
+  it('writes nothing to the SPI NOR flash when its copy cannot be kept', async () => {
+    const board = new FakeBoard({ storages: { 9: 16 * MiB }, defaultStorage: 9 });
+    const { runner } = await setup(board);
+    const res = await flash(runner, spiPlan(async () => ({ error: 'disk full' })), hooks([]));
+    expect(res).toMatchObject({ ok: false, reason: 'The copy of the SPI NOR flash could not be saved on this computer. Nothing was written.', detail: 'disk full' });
+    expect(board.log.filter((l) => l === 'cmd 0x15')).toEqual([]);
+  });
+
+  it('never takes a storage larger than any SPI NOR flash for it (an eMMC or a UFS module)', async () => {
+    // A loader that answers the switch to SPI NOR (cs 9) but stays on a 32 GB storage.
+    const board = new FakeBoard({ storages: { 9: 32e9 }, defaultStorage: 9 });
+    const { runner } = await setup(board);
+    let asked = false;
+    const res = await flash(runner, spiPlan(async () => { asked = true; return { path: '/kept' }; }), hooks([]));
+    expect((res as { reason: string }).reason).toBe(spiStorageProblem(32e9));
+    expect(asked).toBe(false);
+    expect(board.log.filter((l) => l === 'cmd 0x15')).toEqual([]);
+  });
+});
+
+describe('the SPI NOR storage check', () => {
+  it('needs a size, and one an SPI NOR flash can have', () => {
+    expect(spiStorageProblem(null)).toMatch(/did not report the size/);
+    expect(spiStorageProblem(16 * MiB)).toBeNull();
+    expect(spiStorageProblem(SPI_MAX_BYTES)).toBeNull();
+    expect(spiStorageProblem(SPI_MAX_BYTES + 512)).toMatch(/larger than any SPI NOR flash/);
   });
 });

@@ -27,6 +27,7 @@ const api: ImagerApi = {
   pickUpdateImage: () => ipcRenderer.invoke('maskrom:pick-update'),
   getLoader: (name) => ipcRenderer.invoke('maskrom:loader', name),
   releaseMaskrom: (token) => ipcRenderer.invoke('maskrom:release', token),
+  keepSpiBackup: (board, data) => ipcRenderer.invoke('maskrom:keep-spi', board, data),
   onUsbChoice: (cb) => {
     const h = (_e: unknown, c: Parameters<typeof cb>[0]) => cb(c);
     ipcRenderer.on('usb:choose', h);

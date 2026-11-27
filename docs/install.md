@@ -107,6 +107,15 @@ For a board's SPI NOR flash (Maskrom) use the release's SPI bootloader. A
 file from this computer is accepted there only if it can be a bootloader:
 not larger than the SPI flash, and not a disk image.
 
+Before anything is written to the SPI NOR flash, the desktop app checks that
+the storage the board reports is SPI NOR sized (never an eMMC or a UFS
+module), then copies the whole flash to a folder of its own under the app's
+data folder, `spi-backups/<board>-<time>/spi-nor-before.bin`, with a
+`backup.txt` that gives its SHA-256. The run page shows the folder. To put
+the old contents back, write `spi-nor-before.bin` to the SPI NOR flash as
+**A file on this computer**. Clear cache leaves these copies alone. The web
+version keeps no copy.
+
 ## Updates
 
 The app asks GitHub for the list of Roxora Imager releases when it starts,

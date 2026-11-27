@@ -74,6 +74,8 @@ interface Run {
   saved?: string;
   /** A write over Maskrom: the board, to show how to put it back into Maskrom mode. */
   board?: { name: string; soc: string };
+  /** Where the copy of the SPI NOR flash taken before the write was kept. */
+  backup?: string;
 }
 
 const RELEASES_URL = 'https://github.com/roxora-os/build/releases';
@@ -933,6 +935,11 @@ function RunView({ run, onCancel, onDone, onRetry, onBack, facts, reconnect }: {
             {run.result.detail && <p className="detail">{run.result.detail}</p>}
           </Alert>
         )}
+        {run.backup && (
+          <Content component="p" id="spi-backup" className="selectable">
+            {t('Before writing, the SPI NOR flash was copied to {path} ({file}). To put it back, write that file to the SPI NOR flash with A file on this computer.', { path: run.backup, file: 'spi-nor-before.bin' })}
+          </Content>
+        )}
         {run.result?.gone && run.board && (
           <Stack hasGutter id="board-gone">
             <Title headingLevel="h3">{t('Put the board back into Maskrom mode')}</Title>
@@ -1701,11 +1708,14 @@ export function App() {
   const startMaskromWrite = async () => {
     if (!storage || !mb) return;
     const st = STORAGES[storage];
+    // SPI NOR: refuse a storage of another size, and keep a copy of the flash first where the app can save one.
+    const keepSpi = storage === 'spinor' && !!api.keepSpiBackup;
     const r: Run = {
       kind: 'maskrom', log: [], result: null, board: { name: cur?.boardName ?? mb.boardName, soc: mb.soc },
       stages: [
         { id: 'prepare', label: source === 'release' ? t('Download, check and decompress') : source === 'spi' ? t('Download and check') : source === 'update' ? t('Read the update.img') : t('Prepare the file'), percent: 0 },
         { id: 'loader', label: t('Send the loader and wait for the board'), percent: null },
+        ...(keepSpi ? [{ id: 'backup', label: t('Copy the SPI NOR flash to this computer'), percent: 0 }] : []),
         { id: 'write', label: source === 'update' ? t('Write the partition table, the loader and the partitions to the {storage}', { storage: t(st.label) }) : t('Write {device}', { device: t(st.label) }), percent: 0 },
         { id: 'verify', label: t('Read back and compare'), percent: 0 },
       ],
@@ -1741,7 +1751,13 @@ export function App() {
       storageCode: st.code, storageLabel: st.label, verify: true, resetAfter: settingsNow.resetAfterMaskrom,
       ...(source === 'update' ? { updateImage: true } : {}),
       ...(clearGpt && (source === 'release' || source === 'file') && (storage === 'emmc' || storage === 'sd') ? { clearBackupGpt: true } : {}),
+      ...(storage === 'spinor' ? { spiNor: { keep: keepSpi } } : {}),
     }, {
+      backup: async (data) => {
+        const kept = await api.keepSpiBackup!(mb.board, data);
+        if ('path' in kept) setRun((cur) => cur && { ...cur, backup: kept.path });
+        return kept;
+      },
       log: (line) => setRun((cur) => cur && { ...cur, log: [...cur.log, line] }),
       stage: (s: Stage) => {
         if (s === 'loader' || s === 'reconnect') setStage('loader', { percent: null, detail: s === 'reconnect' ? t('waiting for the board') : undefined });
@@ -1750,7 +1766,7 @@ export function App() {
         if (s === 'reconnect' && WEB) setReconnect(true);
         if (s === 'storage') { setReconnect(false); setStage('loader', { percent: 100, detail: undefined }); }
       },
-      progress: (s, pct) => { if (s === 'write' || s === 'verify') setStage(s, { percent: pct }); },
+      progress: (s, pct) => { if (s === 'backup' || s === 'write' || s === 'verify') setStage(s, { percent: pct }); },
     });
     maskromJob.current = job;
     let res: Awaited<typeof job.done>;
@@ -1930,6 +1946,9 @@ export function App() {
                 )}
                 {method === 'maskrom' && clearGpt && (source === 'release' || source === 'file') && (storage === 'emmc' || storage === 'sd') && (
                   <DescriptionListGroup><DescriptionListTerm>{t('Also')}</DescriptionListTerm><DescriptionListDescription>{t('The old backup partition table at the end of the storage is cleared after the image.')}</DescriptionListDescription></DescriptionListGroup>
+                )}
+                {method === 'maskrom' && storage === 'spinor' && api.keepSpiBackup && (
+                  <DescriptionListGroup><DescriptionListTerm>{t('Kept')}</DescriptionListTerm><DescriptionListDescription>{t('Before writing, the SPI NOR flash is copied to a folder on this computer; the page then shows where.')}</DescriptionListDescription></DescriptionListGroup>
                 )}
                 {method === 'maskrom' && source === 'file' && file && (
                   <DescriptionListGroup><DescriptionListTerm>{t('File')}</DescriptionListTerm><DescriptionListDescription>{file.name}, {formatBytes(file.size)}</DescriptionListDescription></DescriptionListGroup>

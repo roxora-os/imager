@@ -139,6 +139,11 @@ export interface ImagerApi {
    */
   getLoader(name: string): Promise<{ url: string } | { error: string }>;
   releaseMaskrom(token: string): Promise<void>;
+  /**
+   * Desktop only: keep the copy of a board's SPI NOR flash taken before a
+   * write over Maskrom, in a folder of its own; returns the folder.
+   */
+  keepSpiBackup?(board: string, data: Uint8Array): Promise<{ path: string } | { error: string }>;
   onUsbChoice(cb: (choices: { deviceId: string; productName?: string; productId: number }[]) => void): () => void;
   answerUsbChoice(deviceId: string): void;
   getSettings(): Promise<{ updateCheck: boolean; appChannel?: Channel; resetAfterMaskrom: boolean }>;

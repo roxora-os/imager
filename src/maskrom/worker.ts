@@ -55,15 +55,27 @@ export type WorkerRequest =
        * partitions where its parameter.txt puts them (rkfw.ts), instead of
        * one image from sector 0.
        */
-      updateImage?: boolean };
+      updateImage?: boolean;
+      /**
+       * The storage is the SPI NOR flash: refuse a storage of another size,
+       * and with keep, copy the flash to the page first ("backup" event),
+       * which answers with "backup-saved" (sequence.ts FlashPlan.spiNor).
+       */
+      spiNor?: { keep: boolean } }
+  | { type: 'backup-saved'; result: { path: string } | { error: string } };
 
 export type WorkerEvent =
   | { type: 'log'; line: string }
   | { type: 'stage'; stage: Stage; detail?: string }
   | { type: 'progress'; stage: Stage; percent: number }
+  /** The SPI NOR flash as it was, for the page to save; answered with "backup-saved". */
+  | { type: 'backup'; data: Uint8Array }
   | { type: 'result'; result: FlashResult | RegionResult };
 
-const post = (m: WorkerEvent) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m);
+const post = (m: WorkerEvent, transfer: Transferable[] = []) => (self as unknown as DedicatedWorkerGlobalScope).postMessage(m, transfer);
+
+/** The page's answer to the last "backup" event. */
+let backupSaved: ((r: { path: string } | { error: string }) => void) | null = null;
 
 const CHUNK = 4 << 20;
 
@@ -105,6 +117,7 @@ export function xhrSource(url: string, size: number): ByteSource {
 
 self.addEventListener('message', async (ev: MessageEvent<WorkerRequest>) => {
   const m = ev.data;
+  if (m.type === 'backup-saved') { backupSaved?.(m.result); backupSaved = null; return; }
   if (m.type !== 'start') return;
   try {
     const imported = await import(/* @vite-ignore */ m.moduleUrl);
@@ -149,6 +162,12 @@ self.addEventListener('message', async (ev: MessageEvent<WorkerRequest>) => {
       source, expectedSha256: m.sha256,
       verify: m.verify, resetAfter: m.resetAfter, clearBackupGpt: m.clearBackupGpt === true,
       ...(m.reconnectTimeout ? { reconnectTimeout: m.reconnectTimeout } : {}),
+      ...(m.spiNor ? { spiNor: m.spiNor.keep ? {
+        keep: (copy: Uint8Array) => new Promise<{ path: string } | { error: string }>((resolve) => {
+          backupSaved = resolve;
+          post({ type: 'backup', data: copy }, [copy.buffer]);
+        }),
+      } : {} } : {}),
     };
     const result = await flash(runner, plan, hooks);
     post({ type: 'result', result });

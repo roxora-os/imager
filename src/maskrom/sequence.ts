@@ -17,7 +17,7 @@ export interface Runner {
   writeFile(name: string, data: Uint8Array): string;
 }
 
-export type Stage = 'detect' | 'loader' | 'reconnect' | 'storage' | 'write' | 'verify' | 'reset';
+export type Stage = 'detect' | 'loader' | 'reconnect' | 'storage' | 'backup' | 'write' | 'verify' | 'reset';
 
 export interface Hooks {
   stage(stage: Stage, detail?: string): void;
@@ -47,6 +47,30 @@ export interface FlashPlan {
    * before them.
    */
   clearBackupGpt?: boolean;
+  /**
+   * The storage is the SPI NOR flash (from Maskrom Studio's safer SPI
+   * write): nothing is written unless the loader reports a storage of SPI
+   * NOR size (spiStorageProblem), so an eMMC or a UFS module the loader
+   * chose instead is never written. With keep, the flash as it was (all
+   * of it, or the first 32 MiB, as far as reads are trusted) is read first
+   * and handed to keep, which saves it on the computer; when it cannot,
+   * nothing is written.
+   */
+  spiNor?: { keep?: (copy: Uint8Array) => Promise<{ path: string } | { error: string }> };
+}
+
+/** No SPI NOR flash is larger; a storage the loader reports above it is an eMMC or a UFS module. */
+export const SPI_MAX_BYTES = 64 * 1024 * 1024;
+
+/** Why the storage the loader selected must not be taken for the SPI NOR flash, or null. */
+export function spiStorageProblem(capacity: number | null): string | null {
+  if (capacity === null) {
+    return 'The loader did not report the size of the storage it selected, so it cannot be confirmed to be the SPI NOR flash. Nothing was written.';
+  }
+  if (capacity > SPI_MAX_BYTES) {
+    return `The loader selected a storage of ${capacity} bytes, larger than any SPI NOR flash (an eMMC or a UFS module?). Nothing was written.`;
+  }
+  return null;
 }
 
 /** GPT keeps a copy of itself in the last 33 sectors of the disk. */
@@ -264,8 +288,35 @@ export async function flash(r: Runner, plan: FlashPlan, hooks: Hooks): Promise<F
   try {
     await bringUp(r, plan, hooks);
     const capacity = await selectStorage(r, plan.storageCode, plan.storageLabel, hooks);
+    if (plan.spiNor) {
+      const why = spiStorageProblem(capacity);
+      if (why) return { ok: false, reason: why };
+    }
     if (capacity !== null && plan.source.size > capacity) {
       return { ok: false, reason: `The image (${plan.source.size} bytes) does not fit in ${plan.storageLabel} (${capacity} bytes). Nothing was written.` };
+    }
+    if (plan.spiNor?.keep && capacity !== null) {
+      // What the flash holds before it is replaced, kept on the computer: the way back.
+      hooks.stage('backup');
+      hooks.progress('backup', 0);
+      const bytes = Math.min(capacity, TRUSTED_READ_BYTES);
+      const copy = new Uint8Array(bytes);
+      const CHUNK = 2048; // sectors, 1 MiB
+      const sectors = bytes / SECTOR;
+      hooks.log(`$ rkdeveloptool rl 0 ${sectors} (the SPI NOR flash as it is, to keep)`);
+      for (let lba = 0; lba < sectors; lba += CHUNK) {
+        if (hooks.cancelled()) throw new FlashError('Cancelled.');
+        const got = await readSectors(r, lba, Math.min(CHUNK, sectors - lba));
+        if (!got) throw new FlashError('Reading the SPI NOR flash for the copy kept before writing failed. Nothing was written.');
+        copy.set(got, lba * SECTOR);
+        hooks.progress('backup', Math.floor((lba + CHUNK) * 100 / sectors));
+      }
+      const kept = await plan.spiNor.keep(copy);
+      if ('error' in kept) {
+        return { ok: false, reason: 'The copy of the SPI NOR flash could not be saved on this computer. Nothing was written.', detail: kept.error };
+      }
+      hooks.progress('backup', 100);
+      hooks.log(`The SPI NOR flash as it was (${bytes} bytes${bytes < capacity ? `, the first ${bytes} of ${capacity}` : ''}) is kept in ${kept.path}.`);
     }
 
     hooks.stage('write');
