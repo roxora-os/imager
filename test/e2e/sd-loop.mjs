@@ -84,8 +84,11 @@ try {
   check(b.out.ok === false && /does not read back/.test(b.out.reason), 'wrong checksum reported as a read-back mismatch');
 
   const rootSource = execFileSync('readlink', ['-f', sh('findmnt', ['-n', '-o', 'SOURCE', '/'])]).toString().trim();
-  const pk = sh('lsblk', ['-n', '-d', '-o', 'PKNAME', rootSource]).split('\n')[0];
-  const rootDisk = pk ? `/dev/${pk}` : rootSource;
+  // The whole disk under /, also through device-mapper or LVM (runner images
+  // moved / onto dm-0, whose first MiB is a live file system that changes).
+  const under = sh('lsblk', ['-n', '-s', '-r', '-o', 'NAME,TYPE', rootSource]).split('\n').map((l) => l.split(' '));
+  const disk = under.find(([, type]) => type === 'disk')?.[0];
+  const rootDisk = disk ? `/dev/${disk}` : rootSource;
   const before = createHash('sha256').update(execFileSync('sudo', ['head', '-c', '1048576', rootDisk], BIG)).digest('hex');
   const c = await write(rootDisk, imgSha);
   console.log(rootDisk, JSON.stringify(c.out));
