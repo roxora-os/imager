@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Downloads go on where they stopped. A broken-off or cancelled image
+  download keeps its `.part` file, and the next try asks only for the rest
+  (an HTTP Range request); a server that sends the whole file again is read
+  from the start. A network failure or a server error (5xx) is tried again
+  up to three times, after 1, 2 and 4 seconds; a 404 is not. The finished
+  file is still checked against the release's SHA-256, and a mismatch
+  deletes it. Clear cache removes the `.part` files too.
 - Simplified Chinese. The page follows the system language until one is
   chosen in the Display language dialog (the globe in the masthead) or in
   Settings. Known messages from the writer and the Maskrom sequence are

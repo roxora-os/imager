@@ -2,7 +2,7 @@
 // that is one download, and an image a release carries in parts.
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -16,12 +16,14 @@ const image = randomBytes(700000);
 const cuts = [image.subarray(0, 300000), image.subarray(300000, 600000), image.subarray(600000)];
 const requests: string[] = [];
 let server: Server;
+const flaky = new Map<string, number>();
+let cutDone = false;
 let base = '';
 
 beforeAll(async () => {
   server = createServer((req, res) => {
-    requests.push(req.url ?? '');
-    const m = /^\/(ok|slow|swapped)\/image\.img\.xz(?:\.part(\d))?$/.exec(req.url ?? '');
+    requests.push(`${req.url ?? ''}${req.headers.range ? ` ${req.headers.range}` : ''}`);
+    const m = /^\/(ok|slow|swapped|norange|flaky|cut)\/image\.img\.xz(?:\.part(\d))?$/.exec(req.url ?? '');
     if (!m) {
       res.statusCode = 404;
       res.end();
@@ -35,10 +37,26 @@ beforeAll(async () => {
       res.end();
       return;
     }
+    // Two answers of 503 before the file comes.
+    if (m[1] === 'flaky' && (flaky.get(req.url!) ?? 0) < 2) {
+      flaky.set(req.url!, (flaky.get(req.url!) ?? 0) + 1);
+      res.statusCode = 503;
+      res.end();
+      return;
+    }
+    const r = /^bytes=(\d+)-$/.exec(req.headers.range ?? '');
+    if (r && m[1] !== 'norange') {
+      const from = Number(r[1]);
+      res.statusCode = 206;
+      res.setHeader('content-range', `bytes ${from}-${data.length - 1}/${data.length}`);
+      data = data.subarray(from);
+    }
     res.setHeader('content-length', data.length);
     res.write(data.subarray(0, 1000));
     // The second part slow enough to be cancelled.
     if (m[1] === 'slow' && m[2] === '2') setTimeout(() => res.end(data.subarray(1000)), 2000);
+    // The first answer of a whole file breaks off after 250000 bytes.
+    else if (m[1] === 'cut' && !r && !cutDone) { cutDone = true; res.write(data.subarray(1000, 250000), () => setTimeout(() => res.destroy(), 300)); }
     else res.end(data.subarray(1000));
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
@@ -137,11 +155,14 @@ describe('an image in parts', () => {
   it('fails plainly when a part is not in the release', async () => {
     const img = inParts();
     img.parts![2] = { ...img.parts![2], url: `${base}/ok/image.img.xz.part7` };
-    await expect(downloadReleaseFile(img, cache('missing'), () => {}, undefined, f)).rejects.toThrow(/HTTP 404 for part 3 of 3/);
-    expect(left(cache('missing'))).toEqual([]);
+    requests.length = 0;
+    await expect(downloadReleaseFile(img, cache('missing'), () => {}, undefined, f, { backoffMs: 1 })).rejects.toThrow(/HTTP 404 for part 3 of 3/);
+    // Not tried again: a 404 stays a 404. The two good parts are kept for later.
+    expect(requests.filter((u) => u.includes('part7'))).toHaveLength(1);
+    expect(left(cache('missing'))).toEqual(['image.img.xz.part']);
   });
 
-  it('can be cancelled in a later part, and leaves nothing', async () => {
+  it('can be cancelled in a later part, keeps what it has, and goes on from there', async () => {
     const stop = new AbortController();
     const run = downloadReleaseFile(inParts('slow'), cache('cancel'), (p) => {
       // Past the first part: cancel while the second is coming in.
@@ -149,6 +170,58 @@ describe('an image in parts', () => {
     }, stop.signal, f);
     await expect(run).rejects.toThrow();
     expect(stop.signal.aborted).toBe(true);
-    expect(left(cache('cancel'))).toEqual([]);
+    expect(left(cache('cancel'))).toEqual(['image.img.xz.part']);
+    const kept = readFileSync(join(cache('cancel'), 'image.img.xz.part')).length;
+    expect(kept).toBeGreaterThanOrEqual(cuts[0].length);
+    requests.length = 0;
+    const path = await downloadReleaseFile(inParts(), cache('cancel'), () => {}, undefined, f);
+    expect(readFileSync(path).equals(image)).toBe(true);
+    // Part 1 is not fetched again; part 2 goes on where it stopped.
+    const into = kept - cuts[0].length;
+    expect(requests).toEqual([`/ok/image.img.xz.part2${into ? ` bytes=${into}-` : ''}`, '/ok/image.img.xz.part3']);
+    expect(left(cache('cancel'))).toEqual(['image.img.xz']);
+  });
+});
+
+describe('going on after a failure', () => {
+  it('tries a broken-off download again with a Range request', async () => {
+    requests.length = 0;
+    const path = await downloadReleaseFile(whole('cut'), cache('cut'), () => {}, undefined, f, { backoffMs: 1 });
+    expect(readFileSync(path).equals(image)).toBe(true);
+    expect(requests[0]).toBe('/cut/image.img.xz');
+    // Normally it goes on with a Range request; when nothing of the first answer
+    // had reached the disk before it broke off, it asks for the whole file again.
+    expect(requests[1]).toMatch(/^\/cut\/image\.img\.xz( bytes=\d+-)?$/);
+    expect(requests).toHaveLength(2);
+  });
+
+  it('waits out a few server errors before giving up', async () => {
+    requests.length = 0;
+    const path = await downloadReleaseFile(whole('flaky'), cache('flaky'), () => {}, undefined, f, { backoffMs: 1 });
+    expect(readFileSync(path).equals(image)).toBe(true);
+    expect(requests).toEqual(['/flaky/image.img.xz', '/flaky/image.img.xz', '/flaky/image.img.xz']);
+    flaky.clear();
+    await expect(downloadReleaseFile(whole('flaky'), cache('flaky-none'), () => {}, undefined, f, { retries: 1, backoffMs: 1 })).rejects.toThrow(/HTTP 503/);
+  });
+
+  it('starts the part again when the server ignores Range', async () => {
+    const dir = cache('norange');
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'image.img.xz.part'), image.subarray(0, 123456));
+    requests.length = 0;
+    const path = await downloadReleaseFile(whole('norange'), dir, () => {}, undefined, f);
+    expect(readFileSync(path).equals(image)).toBe(true);
+    expect(requests).toEqual(['/norange/image.img.xz bytes=123456-']);
+  });
+
+  it('downloads from nothing once when what it went on from was another file', async () => {
+    const dir = cache('foreign');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'image.img.xz.part'), randomBytes(5000));
+    requests.length = 0;
+    const path = await downloadReleaseFile(whole(), dir, () => {}, undefined, f);
+    expect(readFileSync(path).equals(image)).toBe(true);
+    expect(requests).toEqual(['/ok/image.img.xz bytes=5000-', '/ok/image.img.xz']);
   });
 });
