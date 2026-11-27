@@ -172,5 +172,19 @@ export interface ImagerApi {
    */
   copyText?(text: string): Promise<boolean>;
   openExternal(url: string): Promise<void>;
+  /**
+   * Open a new roxora-os/imager issue filled in with what went wrong
+   * (shared/report.ts), in the browser, for the user to read and send.
+   * Scrubbed before it leaves the page's process.
+   */
+  reportProblem?(f: ProblemFacts): Promise<void>;
+  /** Desktop only: save the whole log, scrubbed, to a file the user picks. */
+  saveLog?(f: ProblemFacts): Promise<{ path: string } | { error: string } | null>;
   setTheme(theme: 'light' | 'dark'): void;
+}
+
+/** What the run page tells "Report a problem" (shared/report.ts adds the version and the system). */
+export interface ProblemFacts {
+  board?: string | null; image?: string | null; destination?: string | null;
+  step?: string | null; error?: string | null; detail?: string | null; log?: string[];
 }

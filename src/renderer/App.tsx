@@ -21,7 +21,7 @@ import {
 } from '../shared/catalog';
 import { BOARD_REQUEST_URL, queryWords, vendorCounts, visibleBoards } from '../shared/boardsearch';
 import { formatBytes, uncompressedName } from '../shared/format';
-import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile, SaveSubject, SaveTarget, UpdateImageFile } from '../shared/ipc';
+import type { CatalogResult, ImagerApi, JobProgress, LocalImage, PreparedFile, ProblemFacts, SaveSubject, SaveTarget, UpdateImageFile } from '../shared/ipc';
 import type { CacheInfo } from '../main/cache';
 import { INTERNAL_WORDS, type HiddenDrive, type Target } from '../shared/targets';
 import { APT_COMMAND, brewCommand, type UpdateCheck, type UpdateOffer, type UpdateResult } from '../shared/update';
@@ -29,7 +29,7 @@ import { CHANNELS, type Channel } from '../shared/channel';
 import { maskromBoard, STORAGES, type StorageId } from '../maskrom/boards';
 import { RKBIN_HOST } from '../maskrom/loaders';
 import { SPI_FLASH_FALLBACK, spiFileProblem } from '../maskrom/spi-check';
-import type { Stage } from '../maskrom/sequence';
+import { BOARD_GONE, type Stage } from '../maskrom/sequence';
 import { startMaskrom, type MaskromJob } from './maskrom-client';
 import { maskromStatus, ROCKCHIP_VID, type MaskromStatus, type SeenDevice } from '../shared/maskrom-detect';
 import { readTheme, applyTheme, type Theme } from './theme';
@@ -65,9 +65,15 @@ interface Run {
   /** `done`: what to show in place of a percentage that is not known (bytes so far). */
   stages: { id: string; label: string; percent: number | null; detail?: string; done?: string }[];
   log: string[];
-  result: { ok: boolean; warning?: boolean; title: string; text: string; detail?: string } | null;
+  /**
+   * reason: the English reason, for a problem report. gone: the board left
+   * the USB bus during the write (maskrom/sequence.ts BOARD_GONE).
+   */
+  result: { ok: boolean; warning?: boolean; title: string; text: string; detail?: string; reason?: string; gone?: boolean } | null;
   /** A save to a file: its token, for Show in folder. */
   saved?: string;
+  /** A write over Maskrom: the board, to show how to put it back into Maskrom mode. */
+  board?: { name: string; soc: string };
 }
 
 const RELEASES_URL = 'https://github.com/roxora-os/build/releases';
@@ -538,6 +544,17 @@ function DriversNote() {
   return <Content component="p">{t('macOS needs no driver.')}</Content>;
 }
 
+/** How a board gets into Maskrom mode. */
+function ConnectSteps() {
+  return (
+    <ol>
+      <li>{t('Disconnect power from the board.')}</li>
+      <li>{t("Hold the Maskrom button and connect the board's USB-C port to this computer.")}</li>
+      <li>{t('Release the button after two seconds.')}</li>
+    </ol>
+  );
+}
+
 type UsbLike = { vendorId: number; productId: number; opened?: boolean; open(): Promise<void>; close(): Promise<void> };
 /** Windows: could a device be opened once (WinUSB installed)? Asked once per device. */
 const usbOpens = new WeakMap<object, boolean>();
@@ -838,11 +855,7 @@ function DestinationStep(p: {
               <Stack hasGutter>
                 {!WEB && <MaskromLive board={p.boardName} soc={mb.soc} />}
                 <Content id="connect">
-                  <ol>
-                    <li>{t('Disconnect power from the board.')}</li>
-                    <li>{t("Hold the Maskrom button and connect the board's USB-C port to this computer.")}</li>
-                    <li>{t('Release the button after two seconds.')}</li>
-                  </ol>
+                  <ConnectSteps />
                   <DriversNote />
                 </Content>
               </Stack>
@@ -877,8 +890,18 @@ function ReviewFooter({ canWrite, why, onWrite, save }: { canWrite: boolean; why
 }
 
 /* The write itself replaces the wizard, as the installer's progress page does. */
-function RunView({ run, onCancel, onDone, reconnect }: { run: Run; onCancel: () => void; onDone: () => void; reconnect: boolean }) {
+function RunView({ run, onCancel, onDone, onRetry, onBack, facts, reconnect }: {
+  run: Run; onCancel: () => void; onDone: () => void; onRetry: () => void; onBack: () => void;
+  /** What Report a problem and Save full log get (shared/report.ts). */
+  facts: () => ProblemFacts; reconnect: boolean;
+}) {
   const working = run.kind === 'file' ? t('Saving') : t('Writing');
+  const [savedLog, setSavedLog] = useState<string | null>(null);
+  // Try again starts a new run in the same view: forget the last saved log.
+  useEffect(() => { setSavedLog(null); }, [run.result]);
+  const saveLog = () => {
+    api.saveLog?.(facts()).then((r) => { if (r) setSavedLog('path' in r ? t('Log saved to {path}. Attach it to the issue.', { path: r.path }) : msg(r.error)); }, () => {});
+  };
   return (
     <PageSection isFilled aria-label={working}>
       <Stack hasGutter className="step">
@@ -910,16 +933,48 @@ function RunView({ run, onCancel, onDone, reconnect }: { run: Run; onCancel: () 
             {run.result.detail && <p className="detail">{run.result.detail}</p>}
           </Alert>
         )}
+        {run.result?.gone && run.board && (
+          <Stack hasGutter id="board-gone">
+            <Title headingLevel="h3">{t('Put the board back into Maskrom mode')}</Title>
+            <Content component="p">{t('The USB connection to the board ended during the write (the cable was pulled, a plug is loose, or the board restarted).')}</Content>
+            {!WEB && <MaskromLive board={run.board.name} soc={run.board.soc} />}
+            <Content><ConnectSteps /></Content>
+            <Content component="p">{t('Then press Try again: your choices are kept, the board is found again, the loader is sent again and the write starts over. Files already downloaded are not downloaded again.')}</Content>
+          </Stack>
+        )}
         <StackItem>
-          {!run.result ? <Button variant="secondary" onClick={onCancel}>{t('Cancel')}</Button> : (
+          {!run.result ? <Button variant="secondary" onClick={onCancel}>{t('Cancel')}</Button> : run.result.ok ? (
             <ActionList>
               <ActionListGroup>
                 <ActionListItem><Button variant="primary" onClick={onDone}>{run.kind === 'file' ? t('Start over') : t('Write another')}</Button></ActionListItem>
-                {run.result.ok && run.saved && api.showSavedFile && (
+                {run.saved && api.showSavedFile && (
                   <ActionListItem><Button variant="secondary" onClick={() => api.showSavedFile!(run.saved!)}>{t('Show in folder')}</Button></ActionListItem>
                 )}
               </ActionListGroup>
             </ActionList>
+          ) : (
+            <Stack hasGutter>
+              <ActionList>
+                <ActionListGroup>
+                  <ActionListItem><Button variant="primary" id="try-again" onClick={onRetry}>{t('Try again')}</Button></ActionListItem>
+                  <ActionListItem><Button variant="secondary" id="back-to-steps" onClick={onBack}>{t('Back to the steps')}</Button></ActionListItem>
+                </ActionListGroup>
+                {api.reportProblem && (
+                  <ActionListGroup>
+                    <ActionListItem><Button variant="link" id="report-problem" onClick={() => { api.reportProblem!(facts()).catch(() => {}); }}>{t('Report a problem')}</Button></ActionListItem>
+                    {api.saveLog && run.log.length > 0 && (
+                      <ActionListItem><Button variant="link" id="save-log" onClick={saveLog}>{t('Save full log')}</Button></ActionListItem>
+                    )}
+                  </ActionListGroup>
+                )}
+              </ActionList>
+              {api.reportProblem && (
+                <Content component="p" className="muted">
+                  {t('Report a problem opens a new issue on GitHub in your browser, filled in with the version, your system, the board, the error and the end of the log, without your user name, home folder, e-mail or IP addresses. Nothing is sent until you send it there.')}
+                </Content>
+              )}
+              {savedLog && <Content component="p" className="selectable">{savedLog}</Content>}
+            </Stack>
           )}
         </StackItem>
         {run.log.length > 0 && (
@@ -1277,6 +1332,8 @@ function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
     ] as Array<[string, React.ReactNode]>),
     [t('Licence'), 'GPL-2.0-only'],
     [t('Source'), link('https://github.com/roxora-os/imager', 'github.com/roxora-os/imager')],
+    ...(api.reportProblem ? [[t('Report a problem'),
+      <Button variant="link" isInline id="about-report" onClick={() => { api.reportProblem!({}).catch(() => {}); }}>{t('Opens a new issue on GitHub with the version and your system filled in.')}</Button>]] as Array<[string, React.ReactNode]> : []),
   ];
   // On the document body, as PatternFly's Modal does, so the backdrop covers the masthead too.
   return createPortal(
@@ -1600,7 +1657,7 @@ export function App() {
         ? { ok: true, title: custom ? t('Saved') : t('Saved and checked'), detail: `SHA-256 ${res.sha256}`, text: custom
           ? t('{path} holds {name}, decompressed. The file is not a Roxora release image and was not checked against one.', { path: tgt.path, name })
           : t('{path} holds {name}, decompressed. It matches the release.', { path: tgt.path, name }) }
-        : { ok: false, title: msg(res.reason), text: /Nothing was saved/.test(res.reason) ? '' : t('Nothing was saved under that name.'),
+        : { ok: false, title: msg(res.reason), text: /Nothing was saved/.test(res.reason) ? '' : t('Nothing was saved under that name.'), reason: res.reason,
           ...(res.detail ? { detail: res.detail } : {}) },
     });
   };
@@ -1637,7 +1694,7 @@ export function App() {
         ? { ok: true, title: t('Written and verified'), text: custom
           ? t('{drive} holds {name}. The read-back matches the image file (SHA-256 {sha}). The file is not a Roxora release image and was not checked against one. You can remove the drive.', { drive: target.description, name, sha: res.sha256 })
           : t('{drive} holds {name}. The read-back matches the release (SHA-256 {sha}). You can remove the drive.', { drive: target.description, name, sha: res.sha256 }) }
-        : { ok: false, title: msg(res.reason), text: /Nothing was written/.test(res.reason) ? '' : t('The drive may be partly written.'), ...(res.detail ? { detail: res.detail } : {}) },
+        : { ok: false, title: msg(res.reason), text: /Nothing was written/.test(res.reason) ? '' : t('The drive may be partly written.'), reason: res.reason, ...(res.detail ? { detail: res.detail } : {}) },
     });
   };
 
@@ -1645,7 +1702,7 @@ export function App() {
     if (!storage || !mb) return;
     const st = STORAGES[storage];
     const r: Run = {
-      kind: 'maskrom', log: [], result: null,
+      kind: 'maskrom', log: [], result: null, board: { name: cur?.boardName ?? mb.boardName, soc: mb.soc },
       stages: [
         { id: 'prepare', label: source === 'release' ? t('Download, check and decompress') : source === 'spi' ? t('Download and check') : source === 'update' ? t('Read the update.img') : t('Prepare the file'), percent: 0 },
         { id: 'loader', label: t('Send the loader and wait for the board'), percent: null },
@@ -1663,17 +1720,17 @@ export function App() {
       const off = api.onProgress((p) => setStage('prepare', { percent: p.total ? Math.min(100, Math.floor(p.bytes * 100 / p.total)) : null, detail: p.stage }));
       const res = await api.prepareMaskrom(image.id, source === 'spi' ? 'spi' : 'image');
       off();
-      if ('error' in res) { finish({ ok: false, title: msg(res.error), text: t('Nothing was written.') }); return; }
+      if ('error' in res) { finish({ ok: false, title: msg(res.error), text: t('Nothing was written.'), reason: res.error }); return; }
       prepared = res;
     }
-    if (!prepared) return;
+    if (!prepared) { finish({ ok: false, title: t('No file to write was chosen.'), text: t('Nothing was written.') }); return; }
     setStage('prepare', { percent: 100, detail: undefined });
     // Rockchip's loader is not shipped: built from rkbin on first use.
     setStage('loader', { percent: null, detail: t("getting Rockchip's loader") });
     const loader = await api.getLoader(mb.loader);
     if ('error' in loader) {
       if (source !== 'file' && source !== 'update') api.releaseMaskrom(prepared.token);
-      finish({ ok: false, title: msg(loader.error), text: t('Nothing was written.') });
+      finish({ ok: false, title: msg(loader.error), text: t('Nothing was written.'), reason: loader.error });
       return;
     }
     setStage('loader', { percent: null, detail: undefined });
@@ -1721,7 +1778,8 @@ export function App() {
     const gpt = 'clearedBackupGpt' in res && res.clearedBackupGpt ? t(' The old backup partition table at the end was cleared.') : '';
     const where = { name: prepared.name, storage: t(st.label) };
     finish(!res.ok
-      ? { ok: false, title: msg(res.reason), text: t('Check the connection and the output below.'), ...(res.detail ? { detail: res.detail } : {}) }
+      ? { ok: false, title: msg(res.reason), text: t('Check the connection and the output below.'), reason: res.reason,
+        ...(res.detail ? { detail: res.detail } : {}), ...(res.reason.startsWith(BOARD_GONE) ? { gone: true } : {}) }
       : res.verified === 'match'
         ? { ok: true, title: t('Written and verified'), text: t('{name} is on the {storage}. The read-back matches (SHA-256 {sha}).', { ...where, sha: res.sha256 }) + gpt + restarting }
         : res.verified === 'partial'
@@ -1730,19 +1788,45 @@ export function App() {
           : { ok: true, warning: true, title: t('Written, not verified'), text: t('{name} is on the {storage}. There was no checksum to compare it with, so it was not read back.', where) + gpt + restarting });
   };
 
+  // A start that throws (an IPC call that failed) ends on the run page with
+  // Try again, never in a run that waits for nothing.
+  const guarded = (start: () => Promise<void>) => start().catch((e: unknown) => {
+    const reason = String((e as Error)?.message ?? e);
+    setRun((cur) => ({ ...(cur ?? { kind: method, stages: [], log: [] }), result: { ok: false, title: msg(reason), text: '', reason } }));
+  });
   // A save erases nothing, so it needs no second question.
-  const onWrite = () => { if (method === 'file') startSave(); else setConfirm(true); };
+  const onWrite = () => { if (method === 'file') guarded(startSave); else setConfirm(true); };
   const doWrite = () => {
     setConfirm(false);
-    if (method === 'sd') { startSd(); return; }
+    if (method === 'sd') { guarded(startSd); return; }
     if (WEB) {
       // WebUSB only shows devices the user picked; this click is the gesture.
       navigator.usb.requestDevice({ filters: [{ vendorId: 0x2207 }] })
-        .then(() => startMaskromWrite(), () => setFileError(t('No board was chosen. Connect it in Maskrom mode and try again.')));
+        .then(() => guarded(startMaskromWrite), () => setFileError(t('No board was chosen. Connect it in Maskrom mode and try again.')));
       return;
     }
-    startMaskromWrite();
+    guarded(startMaskromWrite);
   };
+  // Try again: the same write with every choice kept; what it erases was confirmed already.
+  const retry = () => { if (method === 'file') guarded(startSave); else doWrite(); };
+  // After a failure the wizard opens at Review, with every choice kept.
+  const [wizardStart, setWizardStart] = useState(1);
+  const backToSteps = () => { setWizardStart(4); setRun(null); };
+  useEffect(() => {
+    if (run || wizardStart === 1) return undefined;
+    // Opened at Review once; afterwards the wizard starts at the first step as before.
+    const id = setTimeout(() => setWizardStart(1), 0);
+    return () => clearTimeout(id);
+  }, [run, wizardStart]);
+  const problemFacts = (): ProblemFacts => ({
+    board: cur?.boardName ?? null,
+    image: !custom && image ? (method === 'maskrom' && source === 'spi' && image.spi ? image.spi.file : method === 'maskrom' && (source === 'file' || source === 'update') ? null : image.file) : null,
+    destination: method === 'sd' ? (target?.internal ? 'a built-in disk' : 'SD card or USB drive')
+      : method === 'file' ? 'an image file'
+      : storage ? `${STORAGES[storage].label}, over Maskrom${source === 'file' ? ' (a file on this computer)' : source === 'update' ? ' (a Rockchip update.img)' : ''}` : null,
+    step: run?.stages.find((x) => x.percent !== 100)?.label ?? null,
+    error: run?.result?.reason ?? run?.result?.title ?? null, detail: run?.result?.detail ?? null, log: run?.log ?? [],
+  });
   const cancel = () => {
     if (maskromJob.current) maskromJob.current.cancel();
     else api.cancel();
@@ -1789,9 +1873,9 @@ export function App() {
           </Alert>
         </PageSection>
       )}
-      {run ? <RunView run={run} onCancel={cancel} onDone={finishRun} reconnect={reconnect} /> : (
+      {run ? <RunView run={run} onCancel={cancel} onDone={finishRun} onRetry={retry} onBack={backToSteps} facts={problemFacts} reconnect={reconnect} /> : (
         <PageSection type="wizard" isFilled hasBodyWrapper={false} aria-label={t('Write an image')}>
-          <Wizard navAriaLabel={t('Steps')} isVisitRequired header={<Jump to={jump} done={() => setJump(null)} />} onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
+          <Wizard navAriaLabel={t('Steps')} isVisitRequired startIndex={wizardStart} header={<Jump to={jump} done={() => setJump(null)} />} onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
             <WizardStep name={t('Board')} id="board" footer={{ isNextDisabled: !board && !local, isCancelHidden: true, nextButtonText: t('Next'), backButtonText: t('Back') }}>
               {/* Choosing a board means choosing among its release images: a custom file goes. */}
               <BoardStep catalog={catalog} boards={boards} board={board} reload={load}

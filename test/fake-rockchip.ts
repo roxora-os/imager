@@ -33,6 +33,8 @@ export interface FakeOptions {
   loaderLooksLikeMaskrom?: boolean;
   /** The loader already runs (an earlier attempt), looking like Maskrom. */
   loaderAlreadyRunning?: boolean;
+  /** The USB cable is pulled when the first write arrives: the device is gone from then on. */
+  unplugOnWrite?: boolean;
 }
 
 class Storage {
@@ -99,6 +101,7 @@ export class FakeBoard {
   loaderTimer: any = undefined;
   devices: FakeUsbDevice[] = [];
   log: string[] = [];
+  unplugged = false;
 
   constructor(public opts: FakeOptions) {
     for (const [code, size] of Object.entries(opts.storages)) this.storages.set(Number(code), new Storage(size));
@@ -184,9 +187,15 @@ class FakeUsbDevice {
 
   async transferOut(_ep: number, data: DataView) {
     const bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice();
+    if (this.board.unplugged) throw new DOMException('The device was disconnected.', 'NotFoundError');
     if (!this.loader) return { status: 'stall', bytesWritten: 0 };
     if (this.pending && this.pending.op === 0x15) {
       const p = this.pending;
+      if (this.board.opts.unplugOnWrite) {
+        this.board.unplugged = true;
+        this.board.devices = [];
+        throw new DOMException('The device was disconnected.', 'NotFoundError');
+      }
       const st = this.board.storages.get(this.board.current)!;
       if (p.addr * SECTOR + bytes.length > st.size) {
         this.csw(p.tag, 1);
@@ -259,6 +268,7 @@ class FakeUsbDevice {
   }
 
   async transferIn(_ep: number, length: number) {
+    if (this.board.unplugged) throw new DOMException('The device was disconnected.', 'NotFoundError');
     const next = this.inQueue.shift();
     if (!next) return { status: 'stall', data: new DataView(new ArrayBuffer(0)) };
     if (next.length > length) {

@@ -16,8 +16,10 @@ import type { CatalogResult, ImagerApi, PreparedFile } from '../shared/ipc';
 import { downloadVerified, proxyBase, proxyUrl, releaseFile } from './proxy';
 import { buildLoader, isPinnedLoader, LOADERS } from '../maskrom/loaders';
 import { partitionedSize } from '../maskrom/spi-check';
+import { factsFrom, issueUrl } from '../shared/report';
 
 declare const __APP_VERSION__: string;
+declare const __BUILD_COMMIT__: string;
 declare const __DOWNLOAD_PROXY__: string;
 
 /** The download proxy of this build (ROXORA_DOWNLOAD_PROXY), or null. */
@@ -237,5 +239,14 @@ export const webApi: ImagerApi = {
   },
   checkUpdate: async () => null,
   openExternal: async (url) => { window.open(url, '_blank', 'noopener'); },
+  // The page knows no home folder or user name; e-mail and IP addresses are still removed.
+  reportProblem: async (f) => {
+    const facts = factsFrom(f, {
+      version: `${typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'dev'} (web)`,
+      commit: typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : 'unknown',
+      os: `a browser on ${navigator.platform || 'an unknown system'}`, arch: '',
+    });
+    window.open(issueUrl(facts, { home: '', user: '' }), '_blank', 'noopener');
+  },
   setTheme: () => {},
 };

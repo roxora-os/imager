@@ -72,6 +72,19 @@ export type FlashResult =
 
 export class FlashError extends Error {}
 
+/** The start of the reason when the board left the USB bus during a write (the page shows how to get it back). */
+export const BOARD_GONE = 'The board was disconnected.';
+
+/**
+ * After a failed command: is the board still there? `ld` once; when no
+ * device answers (or ld itself fails), the cable was pulled or the board
+ * reset. From Maskrom Studio's region writer.
+ */
+async function boardGone(r: Runner, e: FlashError, hooks: Hooks): Promise<boolean> {
+  if (e.message === 'Cancelled.' || hooks.cancelled()) return false;
+  try { return parseList((await r.run(['ld'])).lines) === 'none'; } catch { return true; }
+}
+
 export const SECTOR = 512;
 const FILLER = 0xcc;
 
@@ -222,7 +235,7 @@ async function bringUp(r: Runner, plan: { loader: Uint8Array; reconnectTimeout?:
         waited += 500;
       }
       if (!back) {
-        stop('The board did not come back after the loader was sent.',
+        stop(`${BOARD_GONE} It did not come back after the loader was sent.`,
           'Unplug the USB cable, put the board in Maskrom mode again and retry.');
       }
     }
@@ -310,7 +323,10 @@ export async function flash(r: Runner, plan: FlashPlan, hooks: Hooks): Promise<F
     return result;
   } catch (e) {
     if (e instanceof Stopped) return e.result;
-    if (e instanceof FlashError) return { ok: false, reason: e.message };
+    if (e instanceof FlashError) {
+      if (await boardGone(r, e, hooks)) return { ok: false, reason: BOARD_GONE, detail: e.message };
+      return { ok: false, reason: e.message };
+    }
     return { ok: false, reason: 'rkdeveloptool stopped with an error.', detail: String((e as Error)?.message ?? e) };
   }
 }
@@ -468,7 +484,10 @@ export async function flashRegions(r: Runner, plan: RegionPlan, hooks: Hooks): P
   } catch (e) {
     if (e instanceof Stopped) return e.result;
     const partly = written > 0 ? ` The ${plan.storageLabel} is only partly written: run the same write again.` : '';
-    if (e instanceof FlashError) return { ok: false, reason: `${e.message}${partly}`, written };
+    if (e instanceof FlashError) {
+      if (await boardGone(r, e, hooks)) return { ok: false, reason: `${BOARD_GONE}${partly}`, detail: e.message, written };
+      return { ok: false, reason: `${e.message}${partly}`, written };
+    }
     return { ok: false, reason: 'rkdeveloptool stopped with an error.', detail: String((e as Error)?.message ?? e), written };
   }
 }

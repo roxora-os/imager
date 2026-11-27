@@ -58,6 +58,8 @@ const api: ImagerApi = {
     return () => { ipcRenderer.off('update:progress', h); };
   },
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  reportProblem: (f) => ipcRenderer.invoke('report:open', f),
+  saveLog: (f) => ipcRenderer.invoke('report:save-log', f),
   setTheme: (t) => ipcRenderer.send('theme', t),
 };
 

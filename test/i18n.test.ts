@@ -98,6 +98,8 @@ describe('i18n', () => {
     renderToString(createElement(I18nProvider, null, null));
     expect(msg('This update.img is for RK3588, not RK3576. Nothing was written.')).toBe('这个 update.img 是给 RK3588 的，不是 RK3576。没有写入任何内容。');
     expect(msg('No board in Maskrom mode was found.')).toBe('没有找到 Maskrom 模式的开发板。');
+    expect(msg('The board was disconnected. It did not come back after the loader was sent.')).toBe('开发板已断开。发送引导组件后它没有重新连接上。');
+    expect(msg('The board was disconnected. The eMMC is only partly written: run the same write again.')).toBe('开发板已断开。eMMC 只写入了一部分：请重新执行同样的写入。');
     expect(msg('Something new. And more.')).toBe('Something new. And more.');
   });
 });

@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 import { FakeBoard } from './fake-rockchip';
 import { syntheticLoader } from './synthetic-loader';
 import { createRunner } from '../src/maskrom/runner';
-import { flash, parseFlashSize, parseList, type FlashPlan, type Hooks } from '../src/maskrom/sequence';
+import { BOARD_GONE, flash, parseFlashSize, parseList, type FlashPlan, type Hooks } from '../src/maskrom/sequence';
 
 const WASM_DIR = new URL('../vendor/rkdeveloptool-wasm/', import.meta.url);
 const haveWasm = existsSync(new URL('rkdeveloptool.wasm', WASM_DIR));
@@ -150,7 +150,16 @@ describe.skipIf(!haveWasm)('Maskrom flash through the WASM rkdeveloptool', () =>
     const board = new FakeBoard({ storages: { 1: 64 * MiB }, defaultStorage: 1, stayAway: true });
     const { runner } = await setup(board);
     const res = await flash(runner, plan(image, { reconnectTimeout: 1500 }), hooks([]));
-    expect((res as { reason: string }).reason).toMatch(/did not come back/);
+    expect((res as { reason: string }).reason).toBe(`${BOARD_GONE} It did not come back after the loader was sent.`);
+  });
+
+  it('says the board was disconnected when it goes away during the write', async () => {
+    const board = new FakeBoard({ storages: { 1: 64 * MiB }, defaultStorage: 1, unplugOnWrite: true });
+    const { runner } = await setup(board);
+    const res = await flash(runner, plan(image), hooks([]));
+    expect(res.ok).toBe(false);
+    expect((res as { reason: string }).reason).toBe(BOARD_GONE);
+    expect((res as { detail?: string }).detail).toMatch(/Writing failed/);
   });
 
   it('says so when no board is connected', async () => {

@@ -4,8 +4,8 @@
 //   node scripts/shots.mjs OUT_DIR
 import { _electron as electron } from 'playwright-core';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gzipSync } from 'node:zlib';
 
@@ -133,6 +133,9 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     await page.click('.pf-v6-c-masthead button:has-text("Settings")');
     await page.waitForSelector('#settings-title');
     await shot('5-settings');
+    await page.click('#about-open');
+    await page.waitForSelector('#about-title');
+    await shot('5-about');
     await app.close();
   }
 }
@@ -251,6 +254,79 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     if (!(await page.locator(`text=${sha}`).count())) throw new Error('the result does not give the SHA-256 of the saved image');
     console.log(`save ${tag}-${theme}: ${dest} holds the ${data.length} bytes of the image, SHA-256 ${sha}; nothing else in ${dir}`);
     await app.close();
+  }
+}
+// A save that fails (the folder cannot be written): the run page offers
+// Try again, Back to the steps and Report a problem. Report a problem must
+// open a roxora-os/imager issue with nothing of the home folder in it; the
+// main process is told to collect the link instead of opening a browser.
+for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
+  for (const theme of ['light', 'dark']) {
+    const pick = join(mkdtempSync(join(tmpdir(), 'shots-')), 'my-own-build.img.gz');
+    writeFileSync(pick, gzipSync(Buffer.alloc(1024 * 1024, 7)));
+    const dir = mkdtempSync(join(tmpdir(), 'shots-readonly-'));
+    chmodSync(dir, 0o555);
+    const app = await electron.launch({ args: ['.', '--dev-sample'], env: { ...env, ROXORA_IMAGER_TEST_PICK: pick, ROXORA_IMAGER_TEST_SAVE: join(dir, 'my-own-build.img') } });
+    const page = await app.firstWindow();
+    page.on('pageerror', (e) => errors.push(`save-failed-${tag}-${theme}: ${e.message}`));
+    page.on('console', (m) => { if (m.type() === 'error') errors.push(`save-failed-${tag}-${theme} console: ${m.text()}`); });
+    await app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setContentSize(w, h), [w, h]);
+    await page.evaluate((t) => { localStorage.setItem('theme', t); localStorage.setItem('lang', 'en'); }, theme);
+    await page.reload();
+    await page.waitForSelector('h2:has-text("Board")');
+    const shot = async (name) => {
+      await page.mouse.move(1, 1);
+      await page.waitForTimeout(400);
+      const b64 = await app.evaluate(async ({ BrowserWindow }) =>
+        (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+      writeFileSync(`${out}/${name}-${tag}-${theme}.png`, Buffer.from(b64, 'base64'));
+    };
+    await page.click('button:has-text("Use an image file on this computer")');
+    await page.waitForSelector('text=Not a Roxora release image');
+    await page.click('.pf-v6-c-wizard__footer button:has-text("Next")');
+    await page.waitForSelector('h2:has-text("Destination")');
+    await page.click('label[for=method-file]');
+    await page.click('button:has-text("Choose where to save")');
+    await page.click('.pf-v6-c-wizard__footer button:has-text("Review")');
+    await page.waitForSelector('h2:has-text("Review")');
+    await page.click('.pf-v6-c-wizard__footer button:has-text("Save")');
+    await page.waitForSelector('h2:has-text("Stopped")', { timeout: 60000 });
+    for (const b of ['#try-again', '#back-to-steps', '#report-problem']) {
+      if (!(await page.locator(b).count())) throw new Error(`a failed save does not offer ${b}`);
+    }
+    await shot('7-save-failed');
+    if (tag === 'd' && theme === 'light') {
+      const caught = await app.evaluate(({ shell }) => {
+        try {
+          globalThis.openedLinks = [];
+          shell.openExternal = async (u) => { globalThis.openedLinks.push(u); };
+          return true;
+        } catch { return false; }
+      });
+      if (caught) {
+        await page.click('#report-problem');
+        await page.waitForTimeout(500);
+        const links = await app.evaluate(() => globalThis.openedLinks);
+        const link = links[0] ?? '';
+        if (!link.startsWith('https://github.com/roxora-os/imager/issues/new?')) throw new Error(`Report a problem opened "${link}"`);
+        const body = new URL(link).searchParams.get('body') ?? '';
+        if (body.includes(homedir())) throw new Error('the problem report holds the home folder');
+        if (!body.includes('Destination: an image file')) throw new Error(`the problem report does not say what was written:\n${body}`);
+        console.log(`Report a problem: ${link.length} characters, title "${new URL(link).searchParams.get('title')}"`);
+      } else {
+        console.log('Report a problem: shell.openExternal could not be replaced here, link not checked');
+      }
+      // Try again: the same save once more, and the same failure.
+      await page.click('#try-again');
+      await page.waitForSelector('h2:has-text("Stopped")', { timeout: 60000 });
+      // Back to the steps: the review, with every choice kept.
+      await page.click('#back-to-steps');
+      await page.waitForSelector('h2:has-text("Review")');
+      if (!(await page.locator(`text=${join(dir, 'my-own-build.img')}`).count())) throw new Error('Back to the steps lost the place to save');
+      await shot('7-save-failed-back');
+    }
+    await app.close();
+    chmodSync(dir, 0o755);
   }
 }
 // The update notice, the update dialog and the answers to "Check now" in the

@@ -4,6 +4,8 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, net, screen, session, shell, type WebContents } from 'electron';
 import { randomBytes } from 'node:crypto';
 import { open } from 'node:fs/promises';
+import { writeFileSync } from 'node:fs';
+import { homedir, release as osRelease, type as osType, userInfo } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import * as drivelist from 'drivelist';
 import { formatBytes } from '../shared/format';
@@ -27,6 +29,7 @@ import { freeBytes, saveImage } from './save-image';
 import { loadSettings, saveSettings } from './settings';
 import { afterUpdateCleanup, cancelUpdate, checkForUpdate, installUpdate, restartApp } from './updater';
 import { installUsbHandlers, ROCKCHIP_VID, type UsbChoice } from './usb';
+import { factsFrom, fullLog, issueUrl, type Who } from '../shared/report';
 
 registerScheme();
 
@@ -499,6 +502,34 @@ ipcMain.handle('clipboard:write', (_e, text: unknown) => {
 ipcMain.handle('open-external', (_e, url: string) => {
   if (/^https:\/\/(github\.com\/roxora-os\/|roxora-os\.github\.io\/|zadig\.akeo\.ie\/)/.test(url)) return shell.openExternal(url);
 });
+
+// --- reporting a problem (shared/report.ts) ---
+// The page sends what it showed; the facts of this computer and the
+// scrubbing are added here. The issue opens in the browser, filled in, for
+// the user to read, change and send; the app sends nothing.
+declare const __BUILD_COMMIT__: string;
+const reporter = (): Who => ({ home: homedir(), user: (() => { try { return userInfo().username; } catch { return ''; } })() });
+const reportFacts = (f: unknown) => factsFrom(f, {
+  version: app.getVersion(), commit: typeof __BUILD_COMMIT__ === 'string' ? __BUILD_COMMIT__ : 'unknown',
+  os: `${osType()} ${osRelease()}`, arch: process.arch,
+});
+ipcMain.handle('report:open', (_e, f: unknown) => shell.openExternal(issueUrl(reportFacts(f), reporter())));
+/** The whole log, scrubbed, into a file the user picks (to attach to the issue). */
+ipcMain.handle('report:save-log', async (_e, f: unknown): Promise<{ path: string } | { error: string } | null> => {
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const opts = { title: 'Save the log', defaultPath: join(app.getPath('documents'), `roxora-imager-log-${stamp}.txt`),
+    filters: [{ name: 'Text', extensions: ['txt'] }] };
+  const w = BrowserWindow.getFocusedWindow();
+  const r = w ? await dialog.showSaveDialog(w, opts) : await dialog.showSaveDialog(opts);
+  if (r.canceled || !r.filePath) return null;
+  try {
+    writeFileSync(r.filePath, fullLog(reportFacts(f), reporter()));
+    return { path: r.filePath };
+  } catch (err) {
+    return { error: String((err as Error).message ?? err) };
+  }
+});
+
 ipcMain.on('app:info', (e) => {
   e.returnValue = { platform: process.platform, version: app.getVersion(), devSample: DEV_SAMPLE, dataDir: app.getPath('userData') };
 });

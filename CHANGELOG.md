@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+- A failed write, save or Maskrom write ends with Try again (the same
+  write, every choice kept, the board looked for and the loader sent again,
+  downloads taken from the cache) and Back to the steps (the Review step,
+  choices kept), in place of Write another. A start that fails before the
+  write (an internal error) now ends there too instead of a run that waits
+  for nothing.
+- Maskrom: a board that leaves the USB bus during the write is told apart.
+  After a failed rkdeveloptool command the app runs `ld` once; when nothing
+  answers, or the board never came back after the loader, the reason is
+  "The board was disconnected." and the run page shows how to put it back
+  into Maskrom mode, with the live Maskrom line, before Try again.
+- Report a problem, after a failure and in About: opens a new issue on
+  roxora-os/imager in your browser, filled in with the app version and
+  commit, the system, the board, the image, the destination, the step that
+  failed, the error and the last 50 lines of the log. You read and edit it
+  there and send it yourself; the app sends nothing. Save full log writes
+  the whole Maskrom log to a file to attach. Both have the home folder, the
+  user name, e-mail and IP addresses, USB serial numbers, the app's file
+  tokens and anything after password=, token= or key= removed. A problem
+  report template is there for issues opened by hand.
 - Maskrom destination, desktop app: a line above the steps says whether a
   board in Maskrom mode is connected, asked every 1.5 seconds while the
   page is shown and at once when a USB device comes or goes. Green for an
