@@ -105,6 +105,16 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
     await shot('3-destination-maskrom');
     await page.locator('#src-spi').scrollIntoViewIfNeeded();
     await shot('3-destination-maskrom-source');
+    // The live line: no board, then a pretend RK3576 in Maskrom mode.
+    await page.locator('#maskrom-live').scrollIntoViewIfNeeded();
+    await shot('3-destination-maskrom-none');
+    await page.evaluate(() => {
+      navigator.usb.getDevices = async () => [{ vendorId: 0x2207, productId: 0x350e, opened: false, open: async () => {}, close: async () => {} }];
+    });
+    await page.waitForSelector('#maskrom-live.pf-m-success');
+    await page.locator('#maskrom-live').scrollIntoViewIfNeeded();
+    await shot('3-destination-maskrom-connected');
+    await page.evaluate(() => { delete navigator.usb.getDevices; });
     // Save as an image file: the third choice, then a place to save (the
     // app is told where; there is no dialog to click here), then the review.
     await page.click('label[for=method-file]');

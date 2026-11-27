@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Maskrom destination, desktop app: a line above the steps says whether a
+  board in Maskrom mode is connected, asked every 1.5 seconds while the
+  page is shown and at once when a USB device comes or goes. Green for an
+  RK3576 in Maskrom mode (every RK3576 board has the same USB IDs, so it
+  asks you to check it is the board you chose), a warning for another
+  Rockchip chip or several devices, and on Windows "no WinUSB driver" when
+  the device cannot be opened yet. You can still go on without a board.
 - Downloads go on where they stopped. A broken-off or cancelled image
   download keeps its `.part` file, and the next try asks only for the rest
   (an HTTP Range request); a server that sends the whole file again is read

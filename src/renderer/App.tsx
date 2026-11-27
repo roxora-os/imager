@@ -31,6 +31,7 @@ import { RKBIN_HOST } from '../maskrom/loaders';
 import { SPI_FLASH_FALLBACK, spiFileProblem } from '../maskrom/spi-check';
 import type { Stage } from '../maskrom/sequence';
 import { startMaskrom, type MaskromJob } from './maskrom-client';
+import { maskromStatus, ROCKCHIP_VID, type MaskromStatus, type SeenDevice } from '../shared/maskrom-detect';
 import { readTheme, applyTheme, type Theme } from './theme';
 import { msg, t, useI18n } from './i18n';
 import { LANG_NAMES, LANGS, type Lang } from '../shared/i18n';
@@ -537,6 +538,76 @@ function DriversNote() {
   return <Content component="p">{t('macOS needs no driver.')}</Content>;
 }
 
+type UsbLike = { vendorId: number; productId: number; opened?: boolean; open(): Promise<void>; close(): Promise<void> };
+/** Windows: could a device be opened once (WinUSB installed)? Asked once per device. */
+const usbOpens = new WeakMap<object, boolean>();
+
+async function lookForBoard(soc: string): Promise<MaskromStatus> {
+  if (!navigator.usb) return { kind: 'none' };
+  const list = ((await navigator.usb.getDevices()) as UsbLike[]).filter((d) => d.vendorId === ROCKCHIP_VID);
+  const seen: SeenDevice[] = [];
+  for (const d of list) {
+    let opens: boolean | null = null;
+    if (api.platform === 'win32') {
+      if (!usbOpens.has(d)) {
+        let ok = true;
+        try { if (!d.opened) { await d.open(); await d.close(); } } catch { ok = false; }
+        usbOpens.set(d, ok);
+      }
+      opens = usbOpens.get(d) ?? null;
+    }
+    seen.push({ vendorId: d.vendorId, productId: d.productId, opens });
+  }
+  return maskromStatus(seen, soc);
+}
+
+/**
+ * Is a board in Maskrom mode connected? From Maskrom Studio: asked through
+ * WebUSB (main/usb.ts lets the app's pages see Rockchip devices) every
+ * 1.5 s while it is shown and the window is visible, and at once when a
+ * device comes or goes. On Windows a device seen for the first time is
+ * opened once and closed again: if that fails, WinUSB is not installed for
+ * it yet. Desktop only: a browser lists only devices the user picked.
+ */
+function MaskromLive({ board, soc }: { board: string; soc: string }) {
+  const [status, setStatus] = useState<MaskromStatus | null>(null);
+  useEffect(() => {
+    let alive = true;
+    const tick = () => {
+      if (document.visibilityState !== 'visible') return;
+      lookForBoard(soc).then((s) => { if (alive) setStatus(s); }, () => {});
+    };
+    tick();
+    const id = setInterval(tick, 1500);
+    const usb = navigator.usb as unknown as EventTarget | undefined;
+    usb?.addEventListener('connect', tick);
+    usb?.addEventListener('disconnect', tick);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      alive = false;
+      clearInterval(id);
+      usb?.removeEventListener('connect', tick);
+      usb?.removeEventListener('disconnect', tick);
+      document.removeEventListener('visibilitychange', tick);
+    };
+  }, [soc]);
+  if (!status) return null;
+  const s = status;
+  const chip = soc.toUpperCase();
+  return (
+    <Alert isInline id="maskrom-live" variant={s.kind === 'ready' ? 'success' : s.kind === 'none' ? 'info' : 'warning'}
+      title={s.kind === 'ready' ? t('An {chip} board in Maskrom mode is connected', { chip })
+        : s.kind === 'no-driver' ? t('A board in Maskrom mode is connected, but Windows has no WinUSB driver for it')
+        : s.kind === 'other-soc' ? t('A Rockchip device that is not an {chip} in Maskrom mode is connected (USB ID {pid})', { chip, pid: s.pid })
+        : s.kind === 'several' ? t('{n} Rockchip devices are connected; connect only the board you want to write', { n: s.count })
+        : t('No board in Maskrom mode yet')}>
+      {s.kind === 'ready' ? t('Every {chip} board answers with the same USB IDs, so check that it is the {board}.', { chip, board })
+        : s.kind === 'no-driver' ? t('Install WinUSB with Zadig as below, then this turns green.')
+        : s.kind === 'none' ? t('This updates by itself. You can also go on and connect the board later.') : null}
+    </Alert>
+  );
+}
+
 function DestinationStep(p: {
   boardName: string; boardId: string; image: CatalogImage | undefined;
   method: Method; setMethod: (m: Method) => void;
@@ -764,14 +835,17 @@ function DestinationStep(p: {
               {p.spiProblem && <Alert variant="danger" isInline isPlain title={msg(p.spiProblem)} />}
             </FormGroup>
             <FormGroup fieldId="connect" label={t('Connect the board in Maskrom mode')}>
-              <Content id="connect">
-                <ol>
-                  <li>{t('Disconnect power from the board.')}</li>
-                  <li>{t("Hold the Maskrom button and connect the board's USB-C port to this computer.")}</li>
-                  <li>{t('Release the button after two seconds.')}</li>
-                </ol>
-                <DriversNote />
-              </Content>
+              <Stack hasGutter>
+                {!WEB && <MaskromLive board={p.boardName} soc={mb.soc} />}
+                <Content id="connect">
+                  <ol>
+                    <li>{t('Disconnect power from the board.')}</li>
+                    <li>{t("Hold the Maskrom button and connect the board's USB-C port to this computer.")}</li>
+                    <li>{t('Release the button after two seconds.')}</li>
+                  </ol>
+                  <DriversNote />
+                </Content>
+              </Stack>
             </FormGroup>
           </>
         )}
