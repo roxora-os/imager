@@ -433,7 +433,7 @@ export const MESSAGE_PATTERNS: Array<[RegExp, Record<Lang, string>]> = [
   [/^The update\.img does not match the MD5 inside it \((\w+), expected (\w+)\)\. The file is damaged or incomplete\.$/, { en: '', 'zh-CN': "update.img 与其中的 MD5 不一致（$1，应为 $2）。文件已损坏或不完整。" }],
   [/^The file is not a Rockchip update\.img \(no RKFW header\)\.$/, { en: '', 'zh-CN': "这个文件不是 Rockchip update.img（没有 RKFW 文件头）。" }],
   [/^The loader selected a storage of (\d+) bytes, larger than any SPI NOR flash \(an eMMC or a UFS module\?\)\. Nothing was written\.$/, { en: '', 'zh-CN': "引导组件选中的存储有 $1 字节，比任何 SPI NOR 闪存都大（是 eMMC 或 UFS 模块？）。没有写入任何内容。" }],
-  [/^The (.+) is only partly written: run the same write again\.$/, { en: '', 'zh-CN': "$1 只写入了一部分：请重新执行同样的写入。" }],
+  [/^The ([^.]+) is only partly written: run the same write again\.$/, { en: '', 'zh-CN': "$1 只写入了一部分：请重新执行同样的写入。" }],
   [/^(.+) does not read back as written \(sector (\d+)\)\. Write it again\.$/, { en: '', 'zh-CN': "$1 读回的数据与写入的不一致（扇区 $2）。请重新写入。" }],
   [/^Built-in (.+) of this computer\. Make sure it is not a disk you use\.$/, { en: '', 'zh-CN': "这台电脑内置的 $1。请确认它不是你在用的硬盘。" }],
 ];
