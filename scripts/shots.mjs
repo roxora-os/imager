@@ -178,8 +178,9 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
   await page.click('.pf-v6-c-masthead button:has-text("Settings")');
   await page.click('#clear-cache');
   await page.waitForSelector('#clear-title');
-  if (await page.locator('text=Downloaded images').count()) throw new Error('Clear cache lists downloaded images where there are none');
-  if (!(await page.locator('text=Maskrom loaders built from rkbin').count())) throw new Error('Clear cache does not list the loader');
+  // Only the dialog's list: the settings behind it name both kinds in a sentence.
+  const listed = await page.locator('.pf-v6-c-modal-box:has(#clear-title) li').allInnerTexts();
+  if (listed.length !== 1 || !listed[0].startsWith('Maskrom loaders built from rkbin')) throw new Error(`Clear cache lists: ${JSON.stringify(listed)}`);
   await page.mouse.move(1, 1);
   await page.waitForTimeout(400);
   const b64 = await app.evaluate(async ({ BrowserWindow }) =>
