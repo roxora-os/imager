@@ -76,9 +76,9 @@ stand-ins).
 
 | | |
 | --- | --- |
-| ![Board step: search, a filter by maker and the supported boards with their newest release](docs/screenshots/1-board-light.webp) | ![Image step: the board's images by release, Ubuntu version, desktop, kernel and size, each column sortable](docs/screenshots/2-image-light.webp) |
+| ![Board step: search, a filter by maker and the supported boards with their newest release](docs/screenshots/1-board-light.webp) | ![Image step: the newest release's images by Ubuntu version, desktop, kernel and size, each column sortable, older releases and betas folded away](docs/screenshots/2-image-light.webp) |
 | 1. Board: search or filter by maker | 2. Image: Ubuntu version, command line or GNOME, sortable |
-| ![Destination step: an SD card or USB drive, or the board's own storage over USB in Maskrom mode](docs/screenshots/3-destination-dark.webp) | ![Review step: what will be written where, and the checks before and after](docs/screenshots/4-review-dark.webp) |
+| ![Destination step: an SD card or USB drive, the board's own storage over USB in Maskrom mode, or an image file for Ventoy or a virtual machine](docs/screenshots/3-destination-dark.webp) | ![Review step: what will be written where, and the checks before and after](docs/screenshots/4-review-dark.webp) |
 | 3. Destination: SD card or USB drive, or the board over USB | 4. Review: what is erased, and how it is checked |
 
 ## Languages
