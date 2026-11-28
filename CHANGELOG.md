@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0
 
 - Windows: the WinUSB driver note on the Maskrom destination is now four
   numbered steps in the order they work, with the two things a first-time

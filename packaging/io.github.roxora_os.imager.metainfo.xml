@@ -29,6 +29,11 @@
   <url type="bugtracker">https://github.com/roxora-os/imager/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.0" date="2026-11-28">
+      <description>
+        <p>Simplified Chinese. Save an image as a file for Ventoy or a virtual machine. Downloads go on where they stopped. Maskrom: a vendor's update.img, a copy of the SPI flash before it is written, and a line that says whether a board is connected. A failed write offers Try again and Report a problem. Release tiers for the app's own updates, and native Windows on Arm packages.</p>
+      </description>
+    </release>
     <release version="0.1.10" date="2026-11-16">
       <description>
         <p>Only the newest release is listed, older releases and betas are folded away. On Linux, built-in disks such as a board's eMMC or NVMe drive can be written once shown, and a copy installed from an apt repository is updated by apt.</p>
