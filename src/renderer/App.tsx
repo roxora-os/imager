@@ -1378,7 +1378,7 @@ function AboutModal({ open, onClose }: { open: boolean; onClose: () => void }) {
 
 export function App() {
   // Re-render the page in another language when it is chosen.
-  useI18n();
+  const { lang: pageLang } = useI18n();
   const [theme, setThemeState] = useState<Theme>(readTheme());
   const setTheme = (th: Theme) => { setThemeState(th); applyTheme(th); };
   const [catalog, setCatalog] = useState<CatalogResult | null>(null);
@@ -1848,10 +1848,27 @@ export function App() {
     step: run?.stages.find((x) => x.percent !== 100)?.label ?? null,
     error: run?.result?.reason ?? run?.result?.title ?? null, detail: run?.result?.detail ?? null, log: run?.log ?? [],
   });
+  const [stopAsk, setStopAsk] = useState(false);
   const cancel = () => {
+    setStopAsk(false);
     if (maskromJob.current) maskromJob.current.cancel();
     else api.cancel();
   };
+  // While a write runs, closing the window asks first (main.ts), in the page's language.
+  const running = !!run && !run.result;
+  useEffect(() => {
+    api.setBusy?.(running ? {
+      title: t('Stop now?'), stay: t('Keep going'), leave: t('Close anyway'),
+      text: t('A write is running. Closing the window stops it, and what is being written is left incomplete.'),
+    } : null);
+  }, [running, pageLang]);
+  // In a browser the page can only ask with the browser's own words.
+  useEffect(() => {
+    if (!WEB || !running) return undefined;
+    const ask = (e: BeforeUnloadEvent) => { e.preventDefault(); };
+    window.addEventListener('beforeunload', ask);
+    return () => window.removeEventListener('beforeunload', ask);
+  }, [running]);
 
   const finishRun = () => { setRun(null); setDevice(null); setSaveTarget(null); };
 
@@ -1894,7 +1911,7 @@ export function App() {
           </Alert>
         </PageSection>
       )}
-      {run ? <RunView run={run} onCancel={cancel} onDone={finishRun} onRetry={retry} onBack={backToSteps} facts={problemFacts} reconnect={reconnect} /> : (
+      {run ? <RunView run={run} onCancel={() => setStopAsk(true)} onDone={finishRun} onRetry={retry} onBack={backToSteps} facts={problemFacts} reconnect={reconnect} /> : (
         <PageSection type="wizard" isFilled hasBodyWrapper={false} aria-label={t('Write an image')}>
           <Wizard navAriaLabel={t('Steps')} isVisitRequired startIndex={wizardStart} header={<Jump to={jump} done={() => setJump(null)} />} onStepChange={(_e, step) => { if (step.id === 'dest' && method === 'sd') refreshDrives(); }}>
             <WizardStep name={t('Board')} id="board" footer={{ isNextDisabled: !board && !local, isCancelHidden: true, nextButtonText: t('Next'), backButtonText: t('Back') }}>
@@ -2005,6 +2022,15 @@ export function App() {
         <ModalFooter>
           <Button variant="danger" onClick={doWrite}>{t('Erase and write')}</Button>
           <Button variant="link" onClick={() => setConfirm(false)}>{t('Cancel')}</Button>
+        </ModalFooter>
+      </Modal>
+
+      <Modal isOpen={stopAsk && running} onClose={() => setStopAsk(false)} variant="small" aria-labelledby="stop-title">
+        <ModalHeader title={t('Stop now?')} labelId="stop-title" titleIconVariant="warning" />
+        <ModalBody>{t('If writing has started, what is being written is left incomplete, and the board, card or drive may not start until it is written again. Nothing is undone.')}</ModalBody>
+        <ModalFooter>
+          <Button variant="danger" onClick={cancel}>{t('Stop')}</Button>
+          <Button variant="link" onClick={() => setStopAsk(false)}>{t('Keep going')}</Button>
         </ModalFooter>
       </Modal>
 

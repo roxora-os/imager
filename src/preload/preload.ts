@@ -62,6 +62,7 @@ const api: ImagerApi = {
   reportProblem: (f) => ipcRenderer.invoke('report:open', f),
   saveLog: (f) => ipcRenderer.invoke('report:save-log', f),
   setTheme: (t) => ipcRenderer.send('theme', t),
+  setBusy: (ask) => ipcRenderer.send('app:busy', ask),
 };
 
 contextBridge.exposeInMainWorld('imager', api);

@@ -100,6 +100,15 @@ function createWindow() {
     return { action: 'deny' };
   });
   win.webContents.on('will-navigate', (e, url) => { if (!url.startsWith(ORIGIN)) e.preventDefault(); });
+  // Closing the window in the middle of a write leaves the board, card or drive half written: ask first.
+  win.on('close', (e) => {
+    if (!busy || HIDDEN || !win) return;
+    const choice = dialog.showMessageBoxSync(win, {
+      type: 'warning', buttons: [busy.stay, busy.leave], defaultId: 0, cancelId: 0, noLink: true, title: busy.title, message: busy.title, detail: busy.text,
+    });
+    if (choice === 0) e.preventDefault();
+    else busy = null;
+  });
   if (!HIDDEN) win.once('ready-to-show', () => win?.show());
   win.loadURL(`${ORIGIN}/index.html`);
 }
@@ -538,6 +547,13 @@ ipcMain.on('app:info', (e) => {
   e.returnValue = { platform: process.platform, version: app.getVersion(), devSample: DEV_SAMPLE, dataDir: app.getPath('userData') };
 });
 ipcMain.on('theme', (_e, t: 'light' | 'dark') => { nativeTheme.themeSource = t; });
+/** A write is running: the words to ask with before the window closes, in the page's language (null: nothing runs). */
+let busy: { title: string; text: string; stay: string; leave: string } | null = null;
+ipcMain.on('app:busy', (_e, ask: unknown) => {
+  const a = ask as Record<string, unknown> | null;
+  busy = a && ['title', 'text', 'stay', 'leave'].every((k) => typeof a[k] === 'string')
+    ? { title: String(a.title), text: String(a.text), stay: String(a.stay), leave: String(a.leave) } : null;
+});
 
 app.whenReady().then(() => {
   afterUpdateCleanup();

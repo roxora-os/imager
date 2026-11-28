@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Cancel during a write asks "Stop now?" (Stop, Keep going) instead of
+  cutting the write off at once, and closing the window while a write runs
+  asks the same in a system dialog in the page's language (the web version
+  gets the browser's own question). A board, card or drive left half
+  written may not start until it is written again.
 - Clear cache lists only what is there: with no image downloaded yet the
   dialog no longer lists "Downloaded images: 0 B, files: 0", and Delete is
   not offered for nothing.

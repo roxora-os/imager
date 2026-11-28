@@ -186,6 +186,8 @@ export interface ImagerApi {
   /** Desktop only: save the whole log, scrubbed, to a file the user picks. */
   saveLog?(f: ProblemFacts): Promise<{ path: string } | { error: string } | null>;
   setTheme(theme: 'light' | 'dark'): void;
+  /** Desktop only: a write is running (the words to ask with before the window closes), or null once it has ended. */
+  setBusy?(ask: { title: string; text: string; stay: string; leave: string } | null): void;
 }
 
 /** What the run page tells "Report a problem" (shared/report.ts adds the version and the system). */
