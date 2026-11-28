@@ -484,6 +484,8 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
   await page.click('label[for=method-maskrom]');
   await page.waitForSelector('text=写入内容');
   await shot('3-destination-maskrom');
+  await page.locator('#maskrom-live').scrollIntoViewIfNeeded();
+  await shot('3-destination-maskrom-live');
   await page.click('.pf-v6-c-masthead button:has-text("设置")');
   await page.waitForSelector('#settings-title');
   await shot('5-settings');
