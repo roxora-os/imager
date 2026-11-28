@@ -1289,15 +1289,20 @@ function SettingsModal({ open, onClose, theme, setTheme, onOffer, onUpdate, writ
         <ModalBody>
           <Stack hasGutter>
             <Content component="p">{t('These are deleted, from {dir}:', { dir: cache.images.dir.replace(/[\\/]images$/, '') })}</Content>
+            {/* Only what is there: an empty kind is not listed. */}
             <List>
-              <ListItem>{t('Downloaded images: {size}, files: {files}', { size: formatBytes(cache.images.bytes), files: cache.images.files })}{cache.images.names.length ? ` (${cache.images.names.join(', ')})` : ''}</ListItem>
-              <ListItem>{t('Maskrom loaders built from rkbin: {size}, files: {files}', { size: formatBytes(cache.loaders.bytes), files: cache.loaders.files })}</ListItem>
+              {cache.images.files > 0 && (
+                <ListItem>{t('Downloaded images: {size}, files: {files}', { size: formatBytes(cache.images.bytes), files: cache.images.files })}{cache.images.names.length ? ` (${cache.images.names.join(', ')})` : ''}</ListItem>
+              )}
+              {cache.loaders.files > 0 && (
+                <ListItem>{t('Maskrom loaders built from rkbin: {size}, files: {files}', { size: formatBytes(cache.loaders.bytes), files: cache.loaders.files })}</ListItem>
+              )}
             </List>
             <Content component="p">{t('The settings are kept.')}</Content>
           </Stack>
         </ModalBody>
         <ModalFooter>
-          <Button variant="danger" onClick={doClear}>{t('Delete {size}', { size: formatBytes(cacheBytes) })}</Button>
+          <Button variant="danger" onClick={doClear} isDisabled={cacheBytes === 0}>{t('Delete {size}', { size: formatBytes(cacheBytes) })}</Button>
           <Button variant="link" onClick={() => setClearAsk(false)}>{t('Cancel')}</Button>
         </ModalFooter>
       </Modal>

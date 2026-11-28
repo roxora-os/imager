@@ -140,6 +140,31 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
   }
 }
 
+// Clear cache with a loader built and no image downloaded: only the loader
+// is listed (a data folder of its own, through XDG_CONFIG_HOME).
+{
+  const config = mkdtempSync(join(tmpdir(), 'shots-config-'));
+  mkdirSync(join(config, 'Roxora Imager', 'loaders'), { recursive: true });
+  writeFileSync(join(config, 'Roxora Imager', 'loaders', 'rk3576_spl_loader.bin'), Buffer.alloc(300000, 1));
+  const app = await electron.launch({ args: ['.', '--dev-sample'], env: { ...env, XDG_CONFIG_HOME: config } });
+  const page = await app.firstWindow();
+  page.on('pageerror', (e) => errors.push(`clear-cache: ${e.message}`));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1100, 760));
+  await page.evaluate(() => { localStorage.setItem('theme', 'light'); localStorage.setItem('lang', 'en'); });
+  await page.reload();
+  await page.waitForSelector('h2:has-text("Board")');
+  await page.click('.pf-v6-c-masthead button:has-text("Settings")');
+  await page.click('#clear-cache');
+  await page.waitForSelector('#clear-title');
+  if (await page.locator('text=Downloaded images').count()) throw new Error('Clear cache lists downloaded images where there are none');
+  if (!(await page.locator('text=Maskrom loaders built from rkbin').count())) throw new Error('Clear cache does not list the loader');
+  await page.mouse.move(1, 1);
+  await page.waitForTimeout(400);
+  const b64 = await app.evaluate(async ({ BrowserWindow }) =>
+    (await BrowserWindow.getAllWindows()[0].webContents.capturePage()).toPNG().toString('base64'));
+  writeFileSync(`${out}/5-clear-cache-loader-only-d-light.png`, Buffer.from(b64, 'base64'));
+  await app.close();
+}
 // The empty state: no releases (GitHub API answered with an empty list).
 {
   const app = await electron.launch({ args: ['.'], env: { ...env, ROXORA_IMAGER_SAMPLE: '0', ROXORA_IMAGER_FAKE_RELEASES: 'none' } });

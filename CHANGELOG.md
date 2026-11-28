@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Clear cache lists only what is there: with no image downloaded yet the
+  dialog no longer lists "Downloaded images: 0 B, files: 0", and Delete is
+  not offered for nothing.
 - Maskrom, SPI NOR flash: a safer write. Nothing is written unless the
   storage the board reports after the switch to SPI NOR is SPI NOR sized
   (the board must report its size, at most 64 MiB), so an eMMC or a UFS
