@@ -74,7 +74,9 @@ try {
   const c = await page.evaluate(async () => {
     const loader = await window.imager.getLoader('rk3576_spl_loader.bin');
     if ('error' in loader) return { loaderError: loader.error };
-    const data = crypto.getRandomValues(new Uint8Array(1 << 20));
+    // getRandomValues gives at most 64 KiB at a time.
+    const data = new Uint8Array(1 << 20);
+    for (let i = 0; i < data.length; i += 65536) crypto.getRandomValues(data.subarray(i, i + 65536));
     const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, '0')).join('');
     const sha256 = hex(await crypto.subtle.digest('SHA-256', data));
     const w = new Worker('fake-flash-worker.js', { type: 'module' });
