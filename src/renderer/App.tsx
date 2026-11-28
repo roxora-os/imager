@@ -526,11 +526,18 @@ function DriversNote() {
     );
   }
   if (api.platform === 'win32') {
+    // As steps, in the order they work: Zadig lists the board only while it is in Maskrom mode and connected, and may hide it.
     return (
-      <Content component="p">
-        {t("Windows needs the WinUSB driver for the board in Maskrom mode. Install it once with Zadig: choose the device with ID 2207 in Zadig's list, select WinUSB and click Install Driver.")}{' '}
-        <Button variant="link" isInline component="a" href="https://zadig.akeo.ie/" target="_blank">zadig.akeo.ie</Button>
-      </Content>
+      <>
+        <p>{t('On Windows the board needs the WinUSB driver, installed once per computer with Zadig:')}</p>
+        <ol id="zadig-steps">
+          <li>{t('Put the board in Maskrom mode and connect it, as above.')}</li>
+          <li>{t('Download Zadig and open it:')}{' '}
+            <Button variant="link" isInline component="a" href="https://zadig.akeo.ie/" target="_blank">zadig.akeo.ie</Button></li>
+          <li>{t('Choose the device whose USB ID starts with 2207. If the list does not show it, choose Options, then List All Devices.')}</li>
+          <li>{t('Select WinUSB and click Install Driver.')}</li>
+        </ol>
+      </>
     );
   }
   if (api.platform === 'linux') {

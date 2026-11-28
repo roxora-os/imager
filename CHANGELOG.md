@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Windows: the WinUSB driver note on the Maskrom destination is now four
+  numbered steps in the order they work, with the two things a first-time
+  user trips on: Zadig lists the board only while it is in Maskrom mode
+  and connected, and it may hide it until Options, List All Devices.
 - Cancel during a write asks "Stop now?" (Stop, Keep going) instead of
   cutting the write off at once, and closing the window while a write runs
   asks the same in a system dialog in the page's language (the web version

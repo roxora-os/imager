@@ -544,7 +544,9 @@ ipcMain.handle('report:save-log', async (_e, f: unknown): Promise<{ path: string
 });
 
 ipcMain.on('app:info', (e) => {
-  e.returnValue = { platform: process.platform, version: app.getVersion(), devSample: DEV_SAMPLE, dataDir: app.getPath('userData') };
+  // Screenshots only (unpackaged builds): the page as another system shows it (the Windows driver steps).
+  const platform = (!app.isPackaged && process.env.ROXORA_IMAGER_SHOW_PLATFORM) || process.platform;
+  e.returnValue = { platform, version: app.getVersion(), devSample: DEV_SAMPLE, dataDir: app.getPath('userData') };
 });
 ipcMain.on('theme', (_e, t: 'light' | 'dark') => { nativeTheme.themeSource = t; });
 /** A write is running: the words to ask with before the window closes, in the page's language (null: nothing runs). */
