@@ -370,7 +370,7 @@ for (const [w, h, tag] of [[1100, 760, 'd'], [720, 640, 'm']]) {
       // Back to the steps: the review, with every choice kept.
       await page.click('#back-to-steps');
       await page.waitForSelector('h2:has-text("Review")');
-      if (!(await page.locator(`text=${join(dir, 'my-own-build.img')}`).count())) throw new Error('Back to the steps lost the place to save');
+      if (!(await page.getByText(join(dir, 'my-own-build.img')).count())) throw new Error('Back to the steps lost the place to save');
       await shot('7-save-failed-back');
     }
     await app.close();
