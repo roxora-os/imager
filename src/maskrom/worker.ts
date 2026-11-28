@@ -165,7 +165,7 @@ self.addEventListener('message', async (ev: MessageEvent<WorkerRequest>) => {
       ...(m.spiNor ? { spiNor: m.spiNor.keep ? {
         keep: (copy: Uint8Array) => new Promise<{ path: string } | { error: string }>((resolve) => {
           backupSaved = resolve;
-          post({ type: 'backup', data: copy }, [copy.buffer]);
+          post({ type: 'backup', data: copy }, [copy.buffer as ArrayBuffer]);
         }),
       } : {} } : {}),
     };

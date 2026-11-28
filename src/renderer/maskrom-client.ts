@@ -23,8 +23,8 @@ export function startMaskrom(req: Omit<Extract<WorkerRequest, { type: 'start' }>
     else if (m.type === 'progress') on.progress(m.stage, m.percent);
     else if (m.type === 'backup') {
       const answer = (result: { path: string } | { error: string }) => w.postMessage({ type: 'backup-saved', result } satisfies WorkerRequest);
-      (on.backup ? on.backup(m.data) : Promise.resolve({ error: 'This page cannot keep a copy.' }))
-        .then(answer, (e: unknown) => answer({ error: String((e as Error)?.message ?? e) }));
+      const saving: Promise<{ path: string } | { error: string }> = on.backup ? on.backup(m.data) : Promise.resolve({ error: 'This page cannot keep a copy.' });
+      saving.then(answer, (e: unknown) => answer({ error: String((e as Error)?.message ?? e) }));
     }
     else if (m.type === 'result') { resolve(m.result); w.terminate(); }
   };
