@@ -29,6 +29,11 @@
   <url type="bugtracker">https://github.com/roxora-os/imager/issues</url>
   <content_rating type="oars-1.1"/>
   <releases>
+    <release version="0.2.1" date="2026-11-28">
+      <description>
+        <p>Images a release carries in parts may name them .001, .002 as well as .part1, .part2.</p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-11-28">
       <description>
         <p>Simplified Chinese. Save an image as a file for Ventoy or a virtual machine. Downloads go on where they stopped. Maskrom: a vendor's update.img, a copy of the SPI flash before it is written, and a line that says whether a board is connected. A failed write offers Try again and Report a problem. Release tiers for the app's own updates, and native Windows on Arm packages.</p>

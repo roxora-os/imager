@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
 - An image a release carries in parts may name them <file>.001, <file>.002
   as well as <file>.part1, <file>.part2. Later Roxora releases will use the
