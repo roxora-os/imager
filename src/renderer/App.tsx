@@ -968,24 +968,23 @@ function RunView({ run, onCancel, onDone, onRetry, onBack, facts, reconnect }: {
             </ActionList>
           ) : (
             <Stack hasGutter>
-              <ActionList>
-                <ActionListGroup>
-                  <ActionListItem><Button variant="primary" id="try-again" onClick={onRetry}>{t('Try again')}</Button></ActionListItem>
-                  <ActionListItem><Button variant="secondary" id="back-to-steps" onClick={onBack}>{t('Back to the steps')}</Button></ActionListItem>
-                </ActionListGroup>
-                {api.reportProblem && (
-                  <ActionListGroup>
-                    <ActionListItem><Button variant="link" id="report-problem" onClick={() => { api.reportProblem!(facts()).catch(() => {}); }}>{t('Report a problem')}</Button></ActionListItem>
-                    {api.saveLog && run.log.length > 0 && (
-                      <ActionListItem><Button variant="link" id="save-log" onClick={saveLog}>{t('Save full log')}</Button></ActionListItem>
-                    )}
-                  </ActionListGroup>
-                )}
-              </ActionList>
+              {/* Wraps in a narrow window instead of running off the side. */}
+              <Flex spaceItems={{ default: 'spaceItemsMd' }} flexWrap={{ default: 'wrap' }}>
+                <FlexItem><Button variant="primary" id="try-again" onClick={onRetry}>{t('Try again')}</Button></FlexItem>
+                <FlexItem><Button variant="secondary" id="back-to-steps" onClick={onBack}>{t('Back to the steps')}</Button></FlexItem>
+              </Flex>
               {api.reportProblem && (
-                <Content component="p" className="muted">
-                  {t('Report a problem opens a new issue on GitHub in your browser, filled in with the version, your system, the board, the error and the end of the log, without your user name, home folder, e-mail or IP addresses. Nothing is sent until you send it there.')}
-                </Content>
+                <Stack>
+                  <Flex spaceItems={{ default: 'spaceItemsLg' }} flexWrap={{ default: 'wrap' }}>
+                    <FlexItem><Button variant="link" isInline id="report-problem" onClick={() => { api.reportProblem!(facts()).catch(() => {}); }}>{t('Report a problem')}</Button></FlexItem>
+                    {api.saveLog && run.log.length > 0 && (
+                      <FlexItem><Button variant="link" isInline id="save-log" onClick={saveLog}>{t('Save full log')}</Button></FlexItem>
+                    )}
+                  </Flex>
+                  <Content component="small">
+                    {t('Report a problem opens a new issue on GitHub in your browser, filled in with the version, your system, the board, the error and the end of the log, without your user name, home folder, e-mail or IP addresses. Nothing is sent until you send it there.')}
+                  </Content>
+                </Stack>
               )}
               {savedLog && <Content component="p" className="selectable">{savedLog}</Content>}
             </Stack>
