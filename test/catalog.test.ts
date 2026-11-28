@@ -174,6 +174,25 @@ describe('parseCatalog', () => {
     }
   });
 
+  it('reads parts named .001, .002 as well, but not the two forms mixed', () => {
+    const c = inParts();
+    for (const [n, part] of c.images[0].parts.entries()) {
+      part.file = `${c.images[0].file}.${String(n + 1).padStart(3, '0')}`;
+      part.url = `https://github.com/roxora-os/build/releases/download/v2026.11.0/${part.file}`;
+    }
+    const p = parseCatalog(c);
+    expect(p.problems).toEqual([]);
+    expect(p.images[0].parts.map((x) => x.file)).toEqual([
+      'roxora-radxa-rock-4d-noble-edge-2026.11.0.img.xz.001',
+      'roxora-radxa-rock-4d-noble-edge-2026.11.0.img.xz.002',
+    ]);
+    const mixed = inParts();
+    const second = mixed.images[0].parts[1];
+    second.file = `${mixed.images[0].file}.002`;
+    second.url = `https://github.com/roxora-os/build/releases/download/v2026.11.0/${second.file}`;
+    expect(parseCatalog(mixed).problems[0]).toMatch(/part 2: file name should be .*\.img\.xz\.part2/);
+  });
+
   it('drops an image with one part, with url beside parts, or with neither', () => {
     expect(parseCatalog(inParts([412345678])).problems[0]).toMatch(/"parts" is not a list of 2 to 9 parts/);
     const both = inParts();

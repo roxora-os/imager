@@ -53,8 +53,10 @@ export interface SpiImage {
 /**
  * One part of an image that a release carries in parts: GitHub takes no
  * release file of 2 GiB or more, so a larger .img.xz is published as
- * <file>.part1, <file>.part2, ... (images[].parts in the catalog). The parts
- * joined in order are the file.
+ * <file>.part1, <file>.part2, ... (releases up to 2026.11.6) or <file>.001,
+ * <file>.002, ... (later releases, which 7-Zip opens as one file), listed in
+ * images[].parts in the catalog. One image uses one of the two forms. The
+ * parts joined in order are the file.
  */
 export interface ImagePart {
   file: string;
@@ -227,6 +229,10 @@ function parseParts(raw: unknown, name: string, release: CatalogRelease, imageFi
   }
   const parts: ImagePart[] = [];
   let total = 0;
+  // The form the first part is named in is the form of every part.
+  const first = isObject(raw[0]) ? raw[0].file : undefined;
+  const numbered = first === `${imageFile}.001`;
+  const partName = (i: number) => numbered ? `${imageFile}.${String(i + 1).padStart(3, '0')}` : `${imageFile}.part${i + 1}`;
   raw.forEach((item, i) => {
     const where = `${name} part ${i + 1}`;
     if (!isObject(item)) {
@@ -239,7 +245,7 @@ function parseParts(raw: unknown, name: string, release: CatalogRelease, imageFi
     const psize = int(item, 'size', problems, where);
     const sha256 = str(item, 'sha256', problems, where);
     if (problems.length !== n) return;
-    const expectedFile = `${imageFile}.part${i + 1}`;
+    const expectedFile = partName(i);
     if (file !== expectedFile) problems.push(`${where}: file name should be ${expectedFile}`);
     // Parts, like whole images, are only ever downloaded from this release.
     const expectedUrl = `${DOWNLOAD_PREFIX}${release.tag}/${file}`;

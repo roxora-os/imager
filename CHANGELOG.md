@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- An image a release carries in parts may name them <file>.001, <file>.002
+  as well as <file>.part1, <file>.part2. Later Roxora releases will use the
+  numbered form, which 7-Zip opens as one file; this version is needed to
+  see their desktop images.
+
 ## 0.2.0
 
 - Windows: the WinUSB driver note on the Maskrom destination is now four
